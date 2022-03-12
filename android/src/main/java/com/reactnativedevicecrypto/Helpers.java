@@ -13,6 +13,7 @@ import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
 import java.lang.annotation.Retention;
+import java.math.BigInteger;
 import java.security.Key;
 import java.security.KeyFactory;
 import java.security.KeyPair;
@@ -23,6 +24,9 @@ import java.security.PublicKey;
 import java.security.Signature;
 import java.security.cert.Certificate;
 import java.security.spec.ECGenParameterSpec;
+import java.security.spec.RSAKeyGenParameterSpec;
+import java.util.Arrays;
+
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
@@ -36,16 +40,18 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 public class Helpers {
     private static final String KEY_STORE = "AndroidKeyStore";
     private static final String AES_ALGORITHM = "AES/GCM/NoPadding";
+    private static final String RSA_ALGORITHM = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding";
     private static final int AES_IV_SIZE = 128;
     public static final String PEM_HEADER = "-----BEGIN PUBLIC KEY-----\n";
     public static final String PEM_FOOTER = "-----END PUBLIC KEY-----";
 
     public interface KeyType {
         @Retention(SOURCE)
-        @IntDef({ASYMMETRIC, SYMMETRIC})
+        @IntDef({SIGNING, SYMMETRIC_ENCRYPTION, ASYMMETRIC_ENCRYPTION})
         @interface Types {}
-        int ASYMMETRIC = 0;
-        int SYMMETRIC = 1;
+        int SIGNING = 0;
+        int SYMMETRIC_ENCRYPTION = 1;
+        int ASYMMETRIC_ENCRYPTION = 2;
     }
 
     public interface AccessLevel {
@@ -70,7 +76,7 @@ public class Helpers {
     }
 
     public static KeyInfo getKeyInfo(@NonNull String alias, @KeyType.Types int keyType) throws Exception {
-        if (keyType == KeyType.ASYMMETRIC) {
+        if (keyType == KeyType.SIGNING || keyType == KeyType.ASYMMETRIC_ENCRYPTION) {
           Key key = getPrivateKeyRef(alias);
           KeyFactory factory = KeyFactory.getInstance(key.getAlgorithm(), KEY_STORE);
           return factory.getKeySpec(key, KeyInfo.class);
@@ -87,7 +93,7 @@ public class Helpers {
           return false;
         }
 
-        if (keyType == KeyType.ASYMMETRIC) {
+        if (keyType == KeyType.SIGNING || keyType == KeyType.ASYMMETRIC_ENCRYPTION) {
           return (getPrivateKeyRef(alias) != null);
         } else {
           return (getSymmetricKeyRef(alias) != null);
@@ -112,9 +118,13 @@ public class Helpers {
         int purposes = KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY | KeyProperties.PURPOSE_DECRYPT | KeyProperties.PURPOSE_ENCRYPT;
         KeyGenParameterSpec.Builder builder = new KeyGenParameterSpec.Builder(alias, purposes);
 
-        if (keyType == KeyType.ASYMMETRIC) {
+        if (keyType == KeyType.SIGNING) {
             builder.setAlgorithmParameterSpec(new ECGenParameterSpec("secp256r1"))
                     .setDigests(KeyProperties.DIGEST_SHA256)
+                    .setRandomizedEncryptionRequired(true);
+        } else  if (keyType == KeyType.ASYMMETRIC_ENCRYPTION) {
+            builder.setAlgorithmParameterSpec(new RSAKeyGenParameterSpec(2048, new BigInteger("010001", 16)))
+                    .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512)
                     .setRandomizedEncryptionRequired(true);
         } else {
             builder.setBlockModes(KeyProperties.BLOCK_MODE_GCM)
@@ -153,20 +163,31 @@ public class Helpers {
     }
 
     // ASYMMETRIC KEY METHODS
-    public static PublicKey getOrCreateAsymmetricKey(@NonNull String alias, @NonNull ReadableMap options) throws Exception {
-        if (isKeyExists(alias, KeyType.ASYMMETRIC)) {
+    public static PublicKey getOrCreateSigningKey(@NonNull String alias, @NonNull ReadableMap options) throws Exception {
+        if (isKeyExists(alias, KeyType.SIGNING)) {
             return getPublicKeyRef(alias);
         }
 
-        KeyGenParameterSpec.Builder builder = getBuilder(alias, KeyType.ASYMMETRIC, options);
+        KeyGenParameterSpec.Builder builder = getBuilder(alias, KeyType.SIGNING, options);
         KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, KEY_STORE);
+        keyPairGenerator.initialize(builder.build());
+        KeyPair keyPair = keyPairGenerator.generateKeyPair();
+        return keyPair.getPublic();
+    }
+    public static PublicKey getOrCreateAsymmetricEncryptionKey(@NonNull String alias, @NonNull ReadableMap options) throws Exception {
+        if (isKeyExists(alias, KeyType.ASYMMETRIC_ENCRYPTION)) {
+            return getPublicKeyRef(alias);
+        }
+
+        KeyGenParameterSpec.Builder builder = getBuilder(alias, KeyType.ASYMMETRIC_ENCRYPTION, options);
+        KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA, KEY_STORE);
         keyPairGenerator.initialize(builder.build());
         KeyPair keyPair = keyPairGenerator.generateKeyPair();
         return keyPair.getPublic();
     }
 
     public static PublicKey getPublicKeyRef(@NonNull String alias) throws Exception {
-        if (!isKeyExists(alias, KeyType.ASYMMETRIC)) {
+        if (!isKeyExists(alias, KeyType.SIGNING) && !isKeyExists(alias, KeyType.ASYMMETRIC_ENCRYPTION)) {
             throw new Exception(alias.concat(" not found in keystore"));
         }
         KeyStore keyStore = getKeyStore();
@@ -181,7 +202,7 @@ public class Helpers {
     }
 
     public static String getPublicKeyPEMFormatted(@NonNull String alias) throws Exception {
-        if (!isKeyExists(alias, KeyType.ASYMMETRIC)) {
+        if (!isKeyExists(alias, KeyType.SIGNING) || !isKeyExists(alias, KeyType.ASYMMETRIC_ENCRYPTION)) {
             return null;
         }
         PublicKey publicKey = getPublicKeyRef(alias);
@@ -207,12 +228,12 @@ public class Helpers {
 
     // SYMMETRIC KEY METHODS
     // ______________________________________________
-    public static SecretKey getOrCreateSymmetricKey(@NonNull String alias, @NonNull ReadableMap options) throws Exception {
-        if (isKeyExists(alias, KeyType.SYMMETRIC)) {
+    public static SecretKey getOrCreateSymmetricEncryptionKey(@NonNull String alias, @NonNull ReadableMap options) throws Exception {
+        if (isKeyExists(alias, KeyType.SYMMETRIC_ENCRYPTION)) {
             return getSymmetricKeyRef(alias);
         }
 
-        KeyGenParameterSpec.Builder builder = getBuilder(alias, KeyType.SYMMETRIC, options);
+        KeyGenParameterSpec.Builder builder = getBuilder(alias, KeyType.SYMMETRIC_ENCRYPTION, options);
         KeyGenerator keyGen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEY_STORE);
         keyGen.init(builder.build());
         return keyGen.generateKey();
@@ -245,10 +266,22 @@ public class Helpers {
         return cipher;
     }
 
+    public static Cipher initializeAsymmetricEncrypter(@NonNull PublicKey publicKey) throws Exception {
+        Cipher cipher = Cipher.getInstance(RSA_ALGORITHM);
+        cipher.init(Cipher.ENCRYPT_MODE, publicKey);
+        return cipher;
+    }
+
     public static WritableMap encrypt(@NonNull String textToBeEncrypted, @NonNull Cipher cipher) throws Exception {
-        byte[] encryptedBytes = cipher.doFinal(textToBeEncrypted.getBytes(UTF_8));
+        return encryptBytes(textToBeEncrypted.getBytes(UTF_8),cipher);
+    }
+
+    public static WritableMap encryptBytes(@NonNull byte[] bytesToEncrypt, @NonNull Cipher cipher) throws Exception {
+        byte[] encryptedBytes = cipher.doFinal(bytesToEncrypt);
         WritableMap jsObject = Arguments.createMap();
-        jsObject.putString("iv", Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP));
+      byte[] iv = cipher.getIV();
+      if(null!=iv)
+        jsObject.putString("iv", Base64.encodeToString(iv, Base64.NO_WRAP));
         jsObject.putString("encryptedText", Base64.encodeToString(encryptedBytes, Base64.NO_WRAP));
         return jsObject;
     }
