@@ -21,6 +21,7 @@ export interface KeyCreationParams {
 export enum KeyTypes {
   ASYMMETRIC = 0,
   SYMMETRIC = 1,
+  ASYMMETRIC_ENCRYPTION = 2,
 }
 export interface EncryptionResult {
   iv: string;
