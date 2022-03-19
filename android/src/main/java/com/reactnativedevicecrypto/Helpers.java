@@ -25,7 +25,6 @@ import java.security.Signature;
 import java.security.cert.Certificate;
 import java.security.spec.ECGenParameterSpec;
 import java.security.spec.RSAKeyGenParameterSpec;
-import java.util.Arrays;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
@@ -63,7 +62,7 @@ public class Helpers {
       int AUTHENTICATION_REQUIRED = 2;
     }
 
-    public static String getError(Exception e) {
+    public static String getError(Throwable e) {
         String errorMessage = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
         Log.e(RN_MODULE, errorMessage);
         return errorMessage;
@@ -150,9 +149,7 @@ public class Helpers {
             }
             // Invalidate the keys if the user has registered a new biometric
             // credential. The variable "invalidatedByBiometricEnrollment" is true by default.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-              builder.setInvalidatedByBiometricEnrollment(invalidateOnNewBiometry);
-            }
+            builder.setInvalidatedByBiometricEnrollment(invalidateOnNewBiometry);
             if (Build.VERSION.SDK_INT > Build.VERSION_CODES.R) {
               builder.setIsStrongBoxBacked(true);
             }
@@ -174,6 +171,7 @@ public class Helpers {
         KeyPair keyPair = keyPairGenerator.generateKeyPair();
         return keyPair.getPublic();
     }
+
     public static PublicKey getOrCreateAsymmetricEncryptionKey(@NonNull String alias, @NonNull ReadableMap options) throws Exception {
         if (isKeyExists(alias, KeyType.ASYMMETRIC_ENCRYPTION)) {
             return getPublicKeyRef(alias);
@@ -272,6 +270,13 @@ public class Helpers {
         return cipher;
     }
 
+    public static Cipher initializeAsymmetricDecrypter(@NonNull String alias) throws Exception {
+      PrivateKey privateKey = getPrivateKeyRef(alias);
+        Cipher cipher = Cipher.getInstance(RSA_ALGORITHM);
+        cipher.init(Cipher.DECRYPT_MODE, privateKey);
+        return cipher;
+    }
+
     public static WritableMap encrypt(@NonNull String textToBeEncrypted, @NonNull Cipher cipher) throws Exception {
         return encryptBytes(textToBeEncrypted.getBytes(UTF_8),cipher);
     }
@@ -279,9 +284,9 @@ public class Helpers {
     public static WritableMap encryptBytes(@NonNull byte[] bytesToEncrypt, @NonNull Cipher cipher) throws Exception {
         byte[] encryptedBytes = cipher.doFinal(bytesToEncrypt);
         WritableMap jsObject = Arguments.createMap();
-      byte[] iv = cipher.getIV();
-      if(null!=iv)
-        jsObject.putString("iv", Base64.encodeToString(iv, Base64.NO_WRAP));
+        byte[] iv = cipher.getIV();
+        if (null != iv)
+            jsObject.putString("iv", Base64.encodeToString(iv, Base64.NO_WRAP));
         jsObject.putString("encryptedText", Base64.encodeToString(encryptedBytes, Base64.NO_WRAP));
         return jsObject;
     }

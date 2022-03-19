@@ -8,9 +8,6 @@ import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
-import com.facebook.react.bridge.ReadableArray;
-import com.facebook.react.bridge.ReadableType;
-import com.facebook.react.bridge.WritableNativeArray;
 import com.facebook.react.module.annotations.ReactModule;
 
 import java.security.KeyFactory;
@@ -19,6 +16,7 @@ import java.security.PublicKey;
 import java.security.Security;
 import java.security.Signature;
 import java.security.spec.X509EncodedKeySpec;
+import java.util.Objects;
 
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
@@ -117,7 +115,18 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
 
       // Restricted key requires biometric authentication
       BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(signature);
-      Authenticator.authenticate(Authenticator.Cryptography.SIGN, plainText, options, cryptoObject, getCurrentActivity(), promise);
+      Authenticator.authenticate(options, getCurrentActivity(), cryptoObject)
+        .whenCompleteAsync((result, throwable) -> {
+          if (null != throwable) {
+            promise.reject(E_ERROR, Helpers.getError(throwable));
+            return;
+          }
+          try {
+            promise.resolve(Helpers.sign(plainText, Objects.requireNonNull(result.getSignature())));
+          } catch (Exception e) {
+            promise.reject(E_ERROR, Helpers.getError(e));
+          }
+        });
     } catch (Exception e) {
       promise.reject(E_ERROR, Helpers.getError(e));
     }
@@ -138,7 +147,18 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
 
       // Restricted key requires biometric authentication
       BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(cipher);
-      Authenticator.authenticate(Authenticator.Cryptography.ENCRYPT, plainText, options, cryptoObject, getCurrentActivity(), promise);
+      Authenticator.authenticate(options, getCurrentActivity(), cryptoObject)
+        .whenCompleteAsync((result, throwable) -> {
+          if (null != throwable) {
+            promise.reject(E_ERROR, Helpers.getError(throwable));
+            return;
+          }
+          try {
+            promise.resolve(Helpers.encrypt(plainText, Objects.requireNonNull(result.getCipher())));
+          } catch (Exception e) {
+            promise.reject(E_ERROR, Helpers.getError(e));
+          }
+        });
     } catch (Exception e) {
       promise.reject(E_ERROR, Helpers.getError(e));
     }
@@ -147,20 +167,14 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
   @ReactMethod
   public void encryptBytesAsymmetrically(@NonNull String base64PublicKeyASN1, @NonNull String base64bytesToEncrypt, @NonNull final Promise promise) {
     try {
-      System.out.println("encryptBytesAsymmetrically,"+base64PublicKeyASN1+","+base64bytesToEncrypt);
-      ReactApplicationContext context = getReactApplicationContext();
       byte[] publicKeyBytes = Base64.decode(base64PublicKeyASN1, Base64.NO_WRAP);
-      System.out.println("publicKeyBytes:"+publicKeyBytes);
       String algorithm = SubjectPublicKeyInfo.getInstance(publicKeyBytes).getAlgorithm().getAlgorithm().getId();
       X509EncodedKeySpec keySpec = new X509EncodedKeySpec(publicKeyBytes);
       KeyFactory keyFactory = KeyFactory.getInstance(algorithm);
       PublicKey publicKey = keyFactory.generatePublic(keySpec);
-      System.out.println("publicKey:"+publicKey);
       Cipher cipher = Helpers.initializeAsymmetricEncrypter(publicKey);
       byte[] bytesToEncrypt = Base64.decode(base64bytesToEncrypt, Base64.NO_WRAP);
-      System.out.println("bytesToEncrypt:"+bytesToEncrypt);
       WritableMap jsObject = Helpers.encryptBytes(bytesToEncrypt, cipher);
-      System.out.println("jsObject:"+jsObject);
       promise.resolve(jsObject);
     } catch (Exception e) {
       promise.reject(E_ERROR, Helpers.getError(e));
@@ -168,7 +182,7 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod
-  public void decrypt(@NonNull String alias, String plainText, String ivDecoded, ReadableMap options, @NonNull final Promise promise) {
+  public void decrypt(@NonNull String alias, @NonNull String plainText, String ivDecoded, @NonNull ReadableMap options, @NonNull final Promise promise) {
     try {
       ReactApplicationContext context = getReactApplicationContext();
       Cipher cipher = Helpers.initializeDecrypter(alias, ivDecoded);
@@ -181,7 +195,49 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
 
       // Restricted key requires biometric authentication
       BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(cipher);
-      Authenticator.authenticate(Authenticator.Cryptography.DECRYPT, plainText, options, cryptoObject, getCurrentActivity(), promise);
+      Authenticator.authenticate(options, getCurrentActivity(), cryptoObject)
+        .whenCompleteAsync((result, throwable) -> {
+          if (null != throwable) {
+            promise.reject(E_ERROR, Helpers.getError(throwable));
+            return;
+          }
+          try {
+            promise.resolve(Helpers.decrypt(plainText, Objects.requireNonNull(result.getCipher())));
+          } catch (Exception e) {
+            promise.reject(E_ERROR, Helpers.getError(e));
+          }
+        });
+    } catch (Exception e) {
+      promise.reject(E_ERROR, Helpers.getError(e));
+    }
+  }
+
+  @ReactMethod
+  public void decryptAsymmetrically(@NonNull String alias, @NonNull String cipherText, @NonNull ReadableMap options, @NonNull final Promise promise) {
+    try {
+      ReactApplicationContext context = getReactApplicationContext();
+      Cipher cipher = Helpers.initializeAsymmetricDecrypter(alias);
+
+      // Key usage doesn't require biometric authentication (unrestricted)
+      if (Helpers.doNonAuthenticatedCryptography(alias, Helpers.KeyType.ASYMMETRIC_ENCRYPTION, context)) {
+        promise.resolve(Helpers.decrypt(cipherText, cipher));
+        return;
+      }
+
+      // Restricted key requires biometric authentication
+      BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(cipher);
+      Authenticator.authenticate(options, getCurrentActivity(), cryptoObject)
+        .whenCompleteAsync((result, throwable) -> {
+          if (null != throwable) {
+            promise.reject(E_ERROR, Helpers.getError(throwable));
+            return;
+          }
+          try {
+            promise.resolve(Helpers.decrypt(cipherText, Objects.requireNonNull(result.getCipher())));
+          } catch (Exception e) {
+            promise.reject(E_ERROR, Helpers.getError(e));
+          }
+        });
     } catch (Exception e) {
       promise.reject(E_ERROR, Helpers.getError(e));
     }
@@ -264,7 +320,14 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
   @ReactMethod
   public void authenticateWithBiometry(ReadableMap options, final Promise promise) {
     try {
-      Authenticator.authenticate(options, getCurrentActivity(), promise);
+      Authenticator.authenticate(options, getCurrentActivity())
+        .whenCompleteAsync((cryptoObject, throwable) -> {
+          if (null != throwable) {
+            promise.reject(E_ERROR, Helpers.getError(throwable));
+          } else {
+            promise.resolve(true);
+          }
+        });
     } catch (Exception e) {
       Helpers.getError(e);
     }
