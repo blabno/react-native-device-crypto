@@ -256,6 +256,17 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod
+  public void getPublicKeyBytes(@NonNull String alias, @NonNull final Promise promise) {
+    try {
+      PublicKey publicKey = Helpers.getPublicKeyRef(alias);
+      String encodedToString = Base64.encodeToString(publicKey.getEncoded(), Base64.NO_WRAP);
+      promise.resolve(encodedToString);
+    } catch (Exception e) {
+      promise.reject(E_ERROR, Helpers.getError(e));
+    }
+  }
+
+  @ReactMethod
   public void isKeyExists(@NonNull String alias, @Helpers.KeyType.Types int keyType, @NonNull final Promise promise) {
     try {
       promise.resolve(Helpers.isKeyExists(alias, keyType));
