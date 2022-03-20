@@ -36,6 +36,7 @@ import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
 
+import static com.reactnativedevicecrypto.Helpers.deriveSecretKey;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 
@@ -100,14 +101,6 @@ public class CryptoTests {
 
   public static byte[] fromBase64(String text) {
     return Base64.getDecoder().decode(text);
-  }
-
-  public static SecretKey deriveSecretKey(String password, byte[] salt) throws NoSuchAlgorithmException, InvalidKeySpecException {
-    /* Derive the key, given password and salt. */
-    SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-    KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, 65536, 256);
-    SecretKey tmp = factory.generateSecret(spec);
-    return new SecretKeySpec(tmp.getEncoded(), "AES");
   }
 
   public static byte[] decrypt(byte[] cipherText, SecretKey secret, byte[] iv) throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException {

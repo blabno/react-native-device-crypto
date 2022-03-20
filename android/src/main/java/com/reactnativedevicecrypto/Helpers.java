@@ -6,31 +6,46 @@ import android.security.keystore.KeyInfo;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
 import android.util.Log;
-import androidx.annotation.IntDef;
-import androidx.annotation.NonNull;
+
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
+
+import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
+
 import java.lang.annotation.Retention;
-import java.math.BigInteger;
 import java.security.Key;
 import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.KeyStore;
+import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.Signature;
 import java.security.cert.Certificate;
 import java.security.spec.ECGenParameterSpec;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.KeySpec;
+import java.security.spec.MGF1ParameterSpec;
 import java.security.spec.RSAKeyGenParameterSpec;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.Arrays;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.OAEPParameterSpec;
+import javax.crypto.spec.PBEKeySpec;
+import javax.crypto.spec.PSource;
+import javax.crypto.spec.SecretKeySpec;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.NonNull;
+
 import static com.reactnativedevicecrypto.Constants.RN_MODULE;
 import static java.lang.annotation.RetentionPolicy.SOURCE;
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -39,7 +54,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 public class Helpers {
     private static final String KEY_STORE = "AndroidKeyStore";
     private static final String AES_ALGORITHM = "AES/GCM/NoPadding";
-    private static final String RSA_ALGORITHM = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding";
+    private static final String RSA_ALGORITHM = "RSA/ECB/OAEPPadding";
     private static final int AES_IV_SIZE = 128;
     public static final String PEM_HEADER = "-----BEGIN PUBLIC KEY-----\n";
     public static final String PEM_FOOTER = "-----END PUBLIC KEY-----";
@@ -122,8 +137,10 @@ public class Helpers {
                     .setDigests(KeyProperties.DIGEST_SHA256)
                     .setRandomizedEncryptionRequired(true);
         } else  if (keyType == KeyType.ASYMMETRIC_ENCRYPTION) {
-            builder.setAlgorithmParameterSpec(new RSAKeyGenParameterSpec(2048, new BigInteger("010001", 16)))
-                    .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512)
+            builder.setAlgorithmParameterSpec(new RSAKeyGenParameterSpec(2048, RSAKeyGenParameterSpec.F4))
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
+                    .setBlockModes(KeyProperties.BLOCK_MODE_ECB)
+                    .setDigests(KeyProperties.DIGEST_SHA256)
                     .setRandomizedEncryptionRequired(true);
         } else {
             builder.setBlockModes(KeyProperties.BLOCK_MODE_GCM)
@@ -244,6 +261,10 @@ public class Helpers {
 
     public static Cipher initializeDecrypter(@NonNull String alias, @NonNull String ivDecoded) throws Exception {
         SecretKey secretKey = getSymmetricKeyRef(alias);
+        return initializeDecrypter(secretKey,ivDecoded);
+    }
+
+    public static Cipher initializeDecrypter(@NonNull SecretKey secretKey, @NonNull String ivDecoded) throws Exception {
         byte[] iv = Base64.decode(ivDecoded, Base64.NO_WRAP);
         Cipher cipher = Cipher.getInstance(AES_ALGORITHM);
         GCMParameterSpec spec = new GCMParameterSpec(AES_IV_SIZE, iv);
@@ -257,38 +278,96 @@ public class Helpers {
         return new String(decryptedBytes);
     }
 
+    public static String decryptBytes(@NonNull String textTobeDecrypted, @NonNull Cipher cipher) throws Exception {
+        byte[] encrypted = Base64.decode(textTobeDecrypted, Base64.NO_WRAP);
+        byte[] decryptedBytes = cipher.doFinal(encrypted);
+        return Base64.encodeToString(decryptedBytes, Base64.NO_WRAP);
+    }
+
     public static Cipher initializeEncrypter(@NonNull String alias) throws Exception {
         SecretKey secretKey = getSymmetricKeyRef(alias);
+        return initializeEncrypter(secretKey);
+    }
+
+    public static Cipher initializeEncrypter(@NonNull SecretKey secretKey) throws Exception {
         Cipher cipher = Cipher.getInstance(AES_ALGORITHM);
         cipher.init(Cipher.ENCRYPT_MODE, secretKey);
         return cipher;
     }
 
     public static Cipher initializeAsymmetricEncrypter(@NonNull PublicKey publicKey) throws Exception {
+        OAEPParameterSpec sp = getOAEPParameterSpec();
         Cipher cipher = Cipher.getInstance(RSA_ALGORITHM);
-        cipher.init(Cipher.ENCRYPT_MODE, publicKey);
+        cipher.init(Cipher.ENCRYPT_MODE, publicKey, sp);
         return cipher;
     }
 
     public static Cipher initializeAsymmetricDecrypter(@NonNull String alias) throws Exception {
-      PrivateKey privateKey = getPrivateKeyRef(alias);
+        OAEPParameterSpec sp = getOAEPParameterSpec();
+        PrivateKey privateKey = getPrivateKeyRef(alias);
         Cipher cipher = Cipher.getInstance(RSA_ALGORITHM);
-        cipher.init(Cipher.DECRYPT_MODE, privateKey);
+        cipher.init(Cipher.DECRYPT_MODE, privateKey, sp);
         return cipher;
     }
 
-    public static WritableMap encrypt(@NonNull String textToBeEncrypted, @NonNull Cipher cipher) throws Exception {
+    public static EncryptionResult encrypt(@NonNull String textToBeEncrypted, @NonNull Cipher cipher) throws Exception {
         return encryptBytes(textToBeEncrypted.getBytes(UTF_8),cipher);
     }
 
-    public static WritableMap encryptBytes(@NonNull byte[] bytesToEncrypt, @NonNull Cipher cipher) throws Exception {
+    public static EncryptionResult encryptBytes(@NonNull byte[] bytesToEncrypt, @NonNull Cipher cipher) throws Exception {
         byte[] encryptedBytes = cipher.doFinal(bytesToEncrypt);
-        WritableMap jsObject = Arguments.createMap();
         byte[] iv = cipher.getIV();
-        if (null != iv)
-            jsObject.putString("iv", Base64.encodeToString(iv, Base64.NO_WRAP));
-        jsObject.putString("encryptedText", Base64.encodeToString(encryptedBytes, Base64.NO_WRAP));
+        return new EncryptionResult(encryptedBytes, iv);
+    }
+
+//    TODO deriveSecretKey should take algo name and iteration count as params
+    public static SecretKey deriveSecretKey(String password, byte[] salt) throws NoSuchAlgorithmException, InvalidKeySpecException {
+        /* Derive the key, given password and salt. */
+        SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+        KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, 1024, AES_IV_SIZE);
+        SecretKey secretKey = factory.generateSecret(spec);
+        return new SecretKeySpec(secretKey.getEncoded(), "AES");
+    }
+    public static PublicKey decodeBase64PublicKeyASN1(String base64PublicKeyASN1) throws NoSuchAlgorithmException, InvalidKeySpecException {
+        byte[] publicKeyBytes = Base64.decode(base64PublicKeyASN1, Base64.NO_WRAP);
+        String algorithm = SubjectPublicKeyInfo.getInstance(publicKeyBytes).getAlgorithm().getAlgorithm().getId();
+        X509EncodedKeySpec keySpec = new X509EncodedKeySpec(publicKeyBytes);
+        KeyFactory keyFactory = KeyFactory.getInstance(algorithm);
+        return keyFactory.generatePublic(keySpec);
+    }
+
+    @NonNull
+    private static OAEPParameterSpec getOAEPParameterSpec() {
+        return new OAEPParameterSpec("SHA-256", "MGF1", new MGF1ParameterSpec("SHA-1"), PSource.PSpecified.DEFAULT);
+    }
+
+    public static WritableMap toWritableMap(EncryptionResult encryptionResult) {
+        WritableMap jsObject = Arguments.createMap();
+        write(encryptionResult, jsObject);
         return jsObject;
     }
 
+    public static void write(EncryptionResult encryptionResult, WritableMap map) {
+        if (null != encryptionResult.initializationVector)
+            map.putString("iv", Base64.encodeToString(encryptionResult.initializationVector, Base64.NO_WRAP));
+        map.putString("encryptedText", Base64.encodeToString(encryptionResult.cipherText, Base64.NO_WRAP));
+    }
+
+    public static class EncryptionResult {
+        public byte[] initializationVector;
+        public byte[] cipherText;
+
+        public EncryptionResult(byte[] cipherText, byte[] initializationVector) {
+            this.cipherText = cipherText;
+            this.initializationVector = initializationVector;
+        }
+
+        @Override
+        public String toString() {
+            return "EncryptionResult{" +
+                    "initializationVector=" + Arrays.toString(initializationVector) +
+                    ", cipherText=" + Arrays.toString(cipherText) +
+                    '}';
+        }
+    }
 }
