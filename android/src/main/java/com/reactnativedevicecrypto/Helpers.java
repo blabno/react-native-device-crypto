@@ -13,6 +13,10 @@ import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
 
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
+import org.bouncycastle.crypto.CipherParameters;
+import org.bouncycastle.crypto.digests.SHA256Digest;
+import org.bouncycastle.crypto.generators.PKCS5S2ParametersGenerator;
+import org.bouncycastle.jcajce.provider.symmetric.util.BCPBEKey;
 
 import java.lang.annotation.Retention;
 import java.security.Key;
@@ -27,7 +31,6 @@ import java.security.Signature;
 import java.security.cert.Certificate;
 import java.security.spec.ECGenParameterSpec;
 import java.security.spec.InvalidKeySpecException;
-import java.security.spec.KeySpec;
 import java.security.spec.MGF1ParameterSpec;
 import java.security.spec.RSAKeyGenParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
@@ -39,9 +42,7 @@ import javax.crypto.SecretKey;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.OAEPParameterSpec;
-import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.PSource;
-import javax.crypto.spec.SecretKeySpec;
 
 import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
@@ -55,7 +56,7 @@ public class Helpers {
     private static final String KEY_STORE = "AndroidKeyStore";
     private static final String AES_ALGORITHM = "AES/GCM/NoPadding";
     private static final String RSA_ALGORITHM = "RSA/ECB/OAEPPadding";
-    private static final int AES_IV_SIZE = 128;
+    private static final int AES_KEY_SIZE = 256;
     public static final String PEM_HEADER = "-----BEGIN PUBLIC KEY-----\n";
     public static final String PEM_FOOTER = "-----END PUBLIC KEY-----";
 
@@ -69,12 +70,12 @@ public class Helpers {
     }
 
     public interface AccessLevel {
-      @Retention(SOURCE)
-      @IntDef({ALWAYS, UNLOCKED_DEVICE, AUTHENTICATION_REQUIRED})
-      @interface Types {}
-      int ALWAYS = 0;
-      int UNLOCKED_DEVICE = 1;
-      int AUTHENTICATION_REQUIRED = 2;
+        @Retention(SOURCE)
+        @IntDef({ALWAYS, UNLOCKED_DEVICE, AUTHENTICATION_REQUIRED})
+        @interface Types {}
+        int ALWAYS = 0;
+        int UNLOCKED_DEVICE = 1;
+        int AUTHENTICATION_REQUIRED = 2;
     }
 
     public static String getError(Throwable e) {
@@ -91,26 +92,26 @@ public class Helpers {
 
     public static KeyInfo getKeyInfo(@NonNull String alias, @KeyType.Types int keyType) throws Exception {
         if (keyType == KeyType.SIGNING || keyType == KeyType.ASYMMETRIC_ENCRYPTION) {
-          Key key = getPrivateKeyRef(alias);
-          KeyFactory factory = KeyFactory.getInstance(key.getAlgorithm(), KEY_STORE);
-          return factory.getKeySpec(key, KeyInfo.class);
+            Key key = getPrivateKeyRef(alias);
+            KeyFactory factory = KeyFactory.getInstance(key.getAlgorithm(), KEY_STORE);
+            return factory.getKeySpec(key, KeyInfo.class);
         } else {
-          SecretKey secretKey = getSymmetricKeyRef(alias);
-          SecretKeyFactory secretKeyFactory = SecretKeyFactory.getInstance(secretKey.getAlgorithm(), KEY_STORE);
-          return (KeyInfo) secretKeyFactory.getKeySpec(secretKey, KeyInfo.class);
+            SecretKey secretKey = getSymmetricKeyRef(alias);
+            SecretKeyFactory secretKeyFactory = SecretKeyFactory.getInstance(secretKey.getAlgorithm(), KEY_STORE);
+            return (KeyInfo) secretKeyFactory.getKeySpec(secretKey, KeyInfo.class);
         }
     }
 
     public static boolean isKeyExists(@NonNull String alias, @KeyType.Types int keyType) throws Exception {
         KeyStore keyStore = Helpers.getKeyStore();
         if (!keyStore.containsAlias(alias)) {
-          return false;
+            return false;
         }
 
         if (keyType == KeyType.SIGNING || keyType == KeyType.ASYMMETRIC_ENCRYPTION) {
-          return (getPrivateKeyRef(alias) != null);
+            return (getPrivateKeyRef(alias) != null);
         } else {
-          return (getSymmetricKeyRef(alias) != null);
+            return (getSymmetricKeyRef(alias) != null);
         }
     }
 
@@ -137,7 +138,8 @@ public class Helpers {
                     .setDigests(KeyProperties.DIGEST_SHA256)
                     .setRandomizedEncryptionRequired(true);
         } else  if (keyType == KeyType.ASYMMETRIC_ENCRYPTION) {
-            builder.setAlgorithmParameterSpec(new RSAKeyGenParameterSpec(2048, RSAKeyGenParameterSpec.F4))
+            builder
+                    .setAlgorithmParameterSpec(new RSAKeyGenParameterSpec(2048, RSAKeyGenParameterSpec.F4))
                     .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
                     .setBlockModes(KeyProperties.BLOCK_MODE_ECB)
                     .setDigests(KeyProperties.DIGEST_SHA256)
@@ -267,7 +269,7 @@ public class Helpers {
     public static Cipher initializeDecrypter(@NonNull SecretKey secretKey, @NonNull String ivDecoded) throws Exception {
         byte[] iv = Base64.decode(ivDecoded, Base64.NO_WRAP);
         Cipher cipher = Cipher.getInstance(AES_ALGORITHM);
-        GCMParameterSpec spec = new GCMParameterSpec(AES_IV_SIZE, iv);
+        GCMParameterSpec spec = new GCMParameterSpec(128, iv);
         cipher.init(Cipher.DECRYPT_MODE, secretKey, spec);
         return cipher;
     }
@@ -320,14 +322,16 @@ public class Helpers {
         return new EncryptionResult(encryptedBytes, iv);
     }
 
-//    TODO deriveSecretKey should take algo name and iteration count as params
-    public static SecretKey deriveSecretKey(String password, byte[] salt) throws NoSuchAlgorithmException, InvalidKeySpecException {
+    //    TODO deriveSecretKey should take algo name and iteration count as params
+    public static SecretKey deriveSecretKey(String password, byte[] salt) {
         /* Derive the key, given password and salt. */
-        SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-        KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, 1024, AES_IV_SIZE);
-        SecretKey secretKey = factory.generateSecret(spec);
-        return new SecretKeySpec(secretKey.getEncoded(), "AES");
+        byte[] passwordBytes = Base64.decode(password, Base64.NO_WRAP);
+        PKCS5S2ParametersGenerator generator = new PKCS5S2ParametersGenerator(new SHA256Digest());
+        generator.init(passwordBytes, salt, 1024);
+        CipherParameters cipherParameters = generator.generateDerivedParameters(AES_KEY_SIZE);
+        return new BCPBEKey("PBKDF2WithHmacSHA256", cipherParameters);
     }
+
     public static PublicKey decodeBase64PublicKeyASN1(String base64PublicKeyASN1) throws NoSuchAlgorithmException, InvalidKeySpecException {
         byte[] publicKeyBytes = Base64.decode(base64PublicKeyASN1, Base64.NO_WRAP);
         String algorithm = SubjectPublicKeyInfo.getInstance(publicKeyBytes).getAlgorithm().getAlgorithm().getId();
@@ -338,7 +342,7 @@ public class Helpers {
 
     @NonNull
     private static OAEPParameterSpec getOAEPParameterSpec() {
-        return new OAEPParameterSpec("SHA-256", "MGF1", new MGF1ParameterSpec("SHA-1"), PSource.PSpecified.DEFAULT);
+        return new OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA1, PSource.PSpecified.DEFAULT);
     }
 
     public static WritableMap toWritableMap(EncryptionResult encryptionResult) {
