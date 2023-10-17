@@ -9,7 +9,9 @@ import com.reactnativedevicecrypto.Helpers;
 
 import java.security.KeyStore;
 import java.security.PrivateKey;
+import java.security.PublicKey;
 import java.util.Objects;
+import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 
 import javax.crypto.Cipher;
@@ -27,27 +29,29 @@ public class AndroidEncryption extends AbstractEncryption {
     private final ReactApplicationContext context;
     //TODO use Maps<String,Object>
     private final ReadableMap options;
+    private final Random random;
 
-    public AndroidEncryption(@NonNull Activity activity, @NonNull ReactApplicationContext context, @NonNull ReadableMap options) {
+    public AndroidEncryption(@NonNull Activity activity, @NonNull ReactApplicationContext context, @NonNull ReadableMap options, @NonNull Random random) {
         this.activity = activity;
         this.context = context;
         this.options = options;
+        this.random = random;
     }
 
     @Override
-    protected Cipher getSymmetricCipher(SecretKey secretKey, byte[] iv, CipherMode mode) {
+    protected Cipher getAsymmetricCipher(PublicKey publicKey) {
         try {
-            Cipher cipher = Cipher.getInstance(AES_ALGORITHM);
-            GCMParameterSpec spec = new GCMParameterSpec(128, iv);
-            cipher.init(Cipher.DECRYPT_MODE, secretKey, spec);
+            OAEPParameterSpec sp = getOAEPParameterSpec();
+            Cipher cipher = Cipher.getInstance(RSA_ALGORITHM);
+            cipher.init(Cipher.ENCRYPT_MODE, publicKey, sp);
             return cipher;
         } catch (Exception e) {
-            throw new RuntimeException(String.format("Failed to get cipher for algorithm: %s", AES_ALGORITHM), e);
+            throw new RuntimeException(String.format("Failed to get asymmetric cipher for encryption: %s", RSA_ALGORITHM), e);
         }
     }
 
     @Override
-    protected Cipher getAsymmetricCipher(String alias, CipherMode mode) {
+    protected Cipher getAsymmetricCipher(String alias) {
         try {
             CompletableFuture<Cipher> future = new CompletableFuture<>();
             PrivateKey privateKey = getPrivateKey(alias);
@@ -70,8 +74,37 @@ public class AndroidEncryption extends AbstractEncryption {
             }
             return future.join();
         } catch (Exception e) {
-            throw new RuntimeException(String.format("Failed to get asymmetric cipher for algorithm: %s and alias: %s", AES_ALGORITHM, alias), e);
+            throw new RuntimeException(String.format("Failed to get cipher for algorithm: %s and alias: %s", AES_ALGORITHM, alias), e);
         }
+    }
+
+    @Override
+    protected Cipher getSymmetricCipher(SecretKey secretKey) {
+        try {
+            Cipher cipher = Cipher.getInstance(AES_ALGORITHM);
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey);
+            return cipher;
+        } catch (Exception e) {
+            throw new RuntimeException(String.format("Failed to get cipher for algorithm: %s", AES_ALGORITHM), e);
+        }
+
+    }
+
+    @Override
+    protected Cipher getSymmetricCipher(SecretKey secretKey, byte[] iv) {
+        try {
+            Cipher cipher = Cipher.getInstance(AES_ALGORITHM);
+            GCMParameterSpec spec = new GCMParameterSpec(128, iv);
+            cipher.init(Cipher.DECRYPT_MODE, secretKey, spec);
+            return cipher;
+        } catch (Exception e) {
+            throw new RuntimeException(String.format("Failed to get cipher for algorithm: %s", AES_ALGORITHM), e);
+        }
+    }
+
+    @Override
+    protected Random getRandom() {
+        return random;
     }
 
     @Nullable

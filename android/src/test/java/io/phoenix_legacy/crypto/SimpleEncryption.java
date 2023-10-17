@@ -3,10 +3,12 @@ package io.phoenix_legacy.crypto;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.PrivateKey;
+import java.security.PublicKey;
 import java.security.spec.RSAKeyGenParameterSpec;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Random;
 
 import javax.annotation.Nullable;
 import javax.crypto.Cipher;
@@ -18,6 +20,16 @@ public class SimpleEncryption extends AbstractEncryption {
 
     private final Map<String, KeyPair> keyPairs = new HashMap<>();
 
+    private final Random random;
+
+    public SimpleEncryption() {
+        this(new Random());
+    }
+
+    public SimpleEncryption(Random random) {
+        this.random = random;
+    }
+
     public KeyPair generateKeyPair(String alias) {
         KeyPair keyPair = generateRSAKeyPair();
         keyPairs.put(alias, keyPair);
@@ -25,11 +37,42 @@ public class SimpleEncryption extends AbstractEncryption {
     }
 
     @Override
-    protected Cipher getSymmetricCipher(SecretKey secretKey, byte[] iv, CipherMode mode) {
+    protected Random getRandom() {
+        return random;
+    }
+
+    @Override
+    protected Cipher getAsymmetricCipher(PublicKey publicKey) {
+        try {
+            OAEPParameterSpec sp = getOAEPParameterSpec();
+            Cipher cipher = Cipher.getInstance(RSA_ALGORITHM);
+            cipher.init(Cipher.ENCRYPT_MODE, publicKey, sp);
+            return cipher;
+        } catch (Exception e) {
+            throw new RuntimeException(String.format("Failed to get asymmetric cipher for encryption: %s", RSA_ALGORITHM), e);
+        }
+    }
+
+    @Override
+    protected Cipher getAsymmetricCipher(String alias) {
+        try {
+            PrivateKey privateKey = getPrivateKey(alias);
+            OAEPParameterSpec cipherAlgoParamSpec = getOAEPParameterSpec();
+            Cipher cipher = Cipher.getInstance(RSA_ALGORITHM);
+            cipher.init(Cipher.DECRYPT_MODE, privateKey, cipherAlgoParamSpec);
+            return cipher;
+        } catch (Exception e) {
+            throw new RuntimeException(String.format("Failed to get asymmetric cipher for algorithm: %s and alias: %s", RSA_ALGORITHM, alias), e);
+        }
+    }
+
+    @Override
+    protected Cipher getSymmetricCipher(SecretKey secretKey, byte[] iv) {
+
         try {
             Cipher cipher = Cipher.getInstance(AES_ALGORITHM);
             GCMParameterSpec spec = new GCMParameterSpec(128, iv);
-            cipher.init(mode.getOpMode(), secretKey, spec);
+            cipher.init(Cipher.DECRYPT_MODE, secretKey, spec);
             return cipher;
         } catch (Exception e) {
             throw new RuntimeException(String.format("Failed to get symmetric cipher for algorithm: %s", AES_ALGORITHM), e);
@@ -37,15 +80,13 @@ public class SimpleEncryption extends AbstractEncryption {
     }
 
     @Override
-    protected Cipher getAsymmetricCipher(String alias, CipherMode mode) {
+    protected Cipher getSymmetricCipher(SecretKey secretKey) {
         try {
-            PrivateKey privateKey = getPrivateKey(alias);
-            OAEPParameterSpec cipherAlgoParamSpec = getOAEPParameterSpec();
-            Cipher cipher = Cipher.getInstance(RSA_ALGORITHM);
-            cipher.init(mode.getOpMode(), privateKey, cipherAlgoParamSpec);
+            Cipher cipher = Cipher.getInstance(AES_ALGORITHM);
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey);
             return cipher;
         } catch (Exception e) {
-            throw new RuntimeException(String.format("Failed to get asymmetric cipher for algorithm: %s and alias: %s", RSA_ALGORITHM, alias), e);
+            throw new RuntimeException(String.format("Failed to get cipher for algorithm: %s", AES_ALGORITHM), e);
         }
     }
 

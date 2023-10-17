@@ -10,6 +10,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.bridge.WritableNativeMap;
 import com.facebook.react.module.annotations.ReactModule;
 
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
@@ -43,8 +44,11 @@ import static com.reactnativedevicecrypto.Constants.TOUCH;
 public class DeviceCryptoModule extends ReactContextBaseJavaModule {
   public static final String NAME = "DeviceCrypto";
 
+  private final SecureRandom random;
+
   public DeviceCryptoModule(ReactApplicationContext reactContext) {
     super(reactContext);
+    random = new SecureRandom();
     if (null == Security.getProvider(BouncyCastleProvider.PROVIDER_NAME)) {
       Security.insertProviderAt(new BouncyCastleProvider(), 1);
     }
@@ -184,37 +188,36 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
       promise.reject(E_ERROR, Helpers.getError(e));
     }
   }
-
+    /**
+     * Generates random password, salt and initialization vector. Password and salt are used
+     * to derive symmetric secret key, which is used to encrypt payload.
+     * <p>
+     * The result is a map containing salt, password, iv and encryptedText.
+     *
+     * @param publicKeyDER base64 encoded DER representation of public key
+     * @param payload base64 encoded bytes of payload to be encrypted
+     * @param promise promise to return result through
+     */
   @ReactMethod
-  public void encryptLargeBytesAsymmetrically(@NonNull String base64PublicKeyASN1, @NonNull String base64bytesToEncrypt, @NonNull final Promise promise) {
-      try {
-          SecureRandom random = new SecureRandom();
-          byte[] passwordBytes = new byte[190];
-          byte[] saltBytes = new byte[190];
-          random.nextBytes(passwordBytes);
-          random.nextBytes(saltBytes);
-          String password = Base64.encodeToString(passwordBytes, Base64.NO_WRAP);
-          String salt = Base64.encodeToString(saltBytes, Base64.NO_WRAP);
+  public void encryptLargeBytesAsymmetrically(@NonNull String publicKeyDER, @NonNull String payload, @NonNull final Promise promise) {
+    try {
+      ReactApplicationContext context = getReactApplicationContext();
+      Activity currentActivity = requireCurrentActivity();
+      byte[] publicKeyBytes = decodeBase64(publicKeyDER);
+      byte[] bytesToEncrypt = decodeBase64(payload);
+      AbstractEncryption.AsymmetricallyEncryptedData encryptedData = new AndroidEncryption(currentActivity, context, new WritableNativeMap(), random).encryptLargeBytesAsymmetrically(bytesToEncrypt, publicKeyBytes);
+      WritableMap result = Arguments.createMap();
 
-          PublicKey publicKey = Helpers.decodeBase64PublicKeyASN1(base64PublicKeyASN1);
-          Cipher cipher = Helpers.initializeAsymmetricEncrypter(publicKey);
-          Helpers.EncryptionResult passwordEncryptionResult = Helpers.encryptBytes(passwordBytes, cipher);
-
-          SecretKey secretKey = Helpers.deriveSecretKey(password, saltBytes);
-          Cipher symmetricCipher = Helpers.initializeEncrypter(secretKey);
-          byte[] bytesToEncrypt = Base64.decode(base64bytesToEncrypt, Base64.NO_WRAP);
-          Helpers.EncryptionResult encryptionResult = Helpers.encryptBytes(bytesToEncrypt, symmetricCipher);
-
-          WritableMap result = Arguments.createMap();
-
-          result.putString("salt", salt);
-          result.putString("password", Base64.encodeToString(passwordEncryptionResult.cipherText, Base64.NO_WRAP));
-          Helpers.write(encryptionResult,result);
-
-          promise.resolve(result);
-      } catch (Exception e) {
-          promise.reject(E_ERROR, Helpers.getError(e));
-      }
+      result.putString("salt", encodeBase64(encryptedData.getSalt()));
+//      TODO rename password to encryptedPassword
+      result.putString("password", encodeBase64(encryptedData.getEncryptedPassword()));
+      result.putString("iv", encodeBase64(encryptedData.getIv()));
+//      TODO rename encryptedText to cipherText
+      result.putString("encryptedText", encodeBase64(encryptedData.getCipherText()));
+      promise.resolve(result);
+    } catch (Exception e) {
+      promise.reject(E_ERROR, Helpers.getError(e));
+    }
   }
 
   @ReactMethod
@@ -267,7 +270,7 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
       ReactApplicationContext context = getReactApplicationContext();
       AbstractEncryption.AsymmetricallyEncryptedData encryptedData = new AbstractEncryption.AsymmetricallyEncryptedData(decodeBase64(cipherText), decodeBase64(encryptedPassword), decodeBase64(salt), decodeBase64(iv));
       Activity currentActivity = requireCurrentActivity();
-      byte[] decryptedBytes = new AndroidEncryption(currentActivity, context, options).decryptLargeBytesAsymmetrically(alias, encryptedData);
+      byte[] decryptedBytes = new AndroidEncryption(currentActivity, context, options, random).decryptLargeBytesAsymmetrically(alias, encryptedData);
       promise.resolve(decryptedBytes);
     } catch (Exception e) {
       promise.reject(E_ERROR, Helpers.getError(e));
@@ -413,6 +416,10 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
 
   private static byte[] decodeBase64(String data) {
     return Base64.decode(data, Base64.NO_WRAP);
+  }
+
+  private static String encodeBase64(byte[] data) {
+    return Base64.encodeToString(data, Base64.NO_WRAP);
   }
 
 }

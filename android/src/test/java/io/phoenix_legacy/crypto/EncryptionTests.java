@@ -49,4 +49,20 @@ public class EncryptionTests {
 
         assertArrayEquals(bytesToEncrypt, decryptedBytes);
     }
+
+    @Test
+    public void encryptLargeBytesAsymmetrically() throws Exception {
+        SimpleEncryption encryption = new SimpleEncryption();
+        String keyAlias = randomString(10);
+        KeyPair keyPair = encryption.generateKeyPair(keyAlias);
+
+        byte[] bytesToEncrypt = randomBytes(1025 * 11);
+
+        AbstractEncryption.AsymmetricallyEncryptedData encryptedData = encryption.encryptLargeBytesAsymmetrically(bytesToEncrypt, keyPair.getPublic().getEncoded());
+
+        byte[] password = decrypt(encryptedData.getEncryptedPassword(), keyPair);
+        byte[] decryptedBytes = decrypt(encryptedData.getCipherText(), password, encryptedData.getSalt(), encryptedData.getIv());
+
+        assertArrayEquals(bytesToEncrypt, decryptedBytes);
+    }
 }
