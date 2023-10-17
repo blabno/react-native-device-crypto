@@ -1,5 +1,6 @@
 package com.reactnativedevicecrypto;
 
+import android.app.Activity;
 import android.util.Base64;
 
 import com.facebook.react.bridge.Arguments;
@@ -19,13 +20,14 @@ import java.security.SecureRandom;
 import java.security.Security;
 import java.security.Signature;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
 
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 
 import androidx.annotation.NonNull;
 import androidx.biometric.BiometricPrompt;
+import io.phoenix_legacy.crypto.AbstractEncryption;
+import io.phoenix_legacy.crypto.AndroidEncryption;
 
 import static com.reactnativedevicecrypto.Constants.BIOMETRY;
 import static com.reactnativedevicecrypto.Constants.E_ERROR;
@@ -246,50 +248,35 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
     }
   }
 
+    /**
+     * Decrypts cipherText using initialization vector and symmetric key derived from salt, password.
+     * Password comes from asymmetrically decrypting encryptedPassword using key designated by alias.
+     *
+     * @param alias alias of key to decrypt encryptedPassword
+     * @param encryptedPassword base64 encoded bytes of encrypted encryptedPassword
+     * @param salt base64 encoded salt
+     * @param cipherText base64 encoded cipherText
+     * @param iv base64 encoded initialization vector
+     * @param options biometry options
+     * @param promise promise to return result through
+     */
+//    TODO reorder params to alias, cipherText, encryptedPassword, salt, iv, options, promise
   @ReactMethod
-  public void decryptLargeBytesAsymmetrically(@NonNull String alias, @NonNull String base64PasswordBytes, @NonNull String base64Salt, @NonNull String base64bytesToDecrypt, @NonNull String base64bytesIV, @NonNull ReadableMap options, @NonNull final Promise promise) {
+  public void decryptLargeBytesAsymmetrically(@NonNull String alias, @NonNull String encryptedPassword, @NonNull String salt, @NonNull String cipherText, @NonNull String iv, @NonNull ReadableMap options, @NonNull final Promise promise) {
     try {
       ReactApplicationContext context = getReactApplicationContext();
-      Cipher asymmetricCipher = Helpers.initializeAsymmetricDecrypter(alias);
-
-      CompletableFuture<String> future = new CompletableFuture<>();
-
-      // Key usage doesn't require biometric authentication (unrestricted)
-      if (Helpers.doNonAuthenticatedCryptography(alias, Helpers.KeyType.ASYMMETRIC_ENCRYPTION, context)) {
-        future.complete(Helpers.decryptBytes(base64PasswordBytes, asymmetricCipher));
-      } else {
-        // Restricted key requires biometric authentication
-        BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(asymmetricCipher);
-        Authenticator.authenticate(options, getCurrentActivity(), cryptoObject)
-                .whenCompleteAsync((result, throwable) -> {
-                  if (null != throwable) {
-                    future.completeExceptionally(throwable);
-                    return;
-                  }
-                  try {
-                    future.complete(Helpers.decryptBytes(base64PasswordBytes, Objects.requireNonNull(result.getCipher())));
-                  } catch (Exception e) {
-                    future.completeExceptionally(e);
-                  }
-                });
-      }
-      future.whenCompleteAsync((password, throwable) -> {
-        if (null != throwable) {
-          promise.reject(E_ERROR, Helpers.getError(throwable));
-          return;
-        }
-        try {
-          SecretKey secretKey = Helpers.deriveSecretKey(password, Base64.decode(base64Salt, Base64.NO_WRAP));
-          Cipher cipher = Helpers.initializeDecrypter(secretKey, base64bytesIV);
-          String decrypt = Helpers.decryptBytes(base64bytesToDecrypt, Objects.requireNonNull(cipher));
-          promise.resolve(decrypt);
-        } catch (Exception e) {
-          promise.reject(E_ERROR, Helpers.getError(e));
-        }
-      });
+      AbstractEncryption.AsymmetricallyEncryptedData encryptedData = new AbstractEncryption.AsymmetricallyEncryptedData(decodeBase64(cipherText), decodeBase64(encryptedPassword), decodeBase64(salt), decodeBase64(iv));
+      Activity currentActivity = requireCurrentActivity();
+      byte[] decryptedBytes = new AndroidEncryption(currentActivity, context, options).decryptLargeBytesAsymmetrically(alias, encryptedData);
+      promise.resolve(decryptedBytes);
     } catch (Exception e) {
       promise.reject(E_ERROR, Helpers.getError(e));
     }
+  }
+
+  @NonNull
+  private Activity requireCurrentActivity() {
+    return Objects.requireNonNull(getCurrentActivity(), "@ReactMethod should be called only in context of Activity");
   }
 
   @ReactMethod
@@ -422,6 +409,10 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
     } catch (Exception e) {
       Helpers.getError(e);
     }
+  }
+
+  private static byte[] decodeBase64(String data) {
+    return Base64.decode(data, Base64.NO_WRAP);
   }
 
 }
