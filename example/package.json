@@ -6,24 +6,33 @@
   "scripts": {
     "android": "react-native run-android",
     "ios": "react-native run-ios",
-    "start": "react-native start"
+    "start": "react-native start",
+    "pods": "pod-install --quiet"
   },
   "dependencies": {
+    "@react-native-clipboard/clipboard": "^1.12.1",
     "@react-navigation/bottom-tabs": "6.0.9",
     "@react-navigation/native": "^6.0.6",
     "@react-navigation/native-stack": "^6.2.5",
-    "react": "16.13.1",
-    "react-native": "0.64.1",
+    "base-64": "^1.0.0",
+    "react": "18.2.0",
+    "react-native": "0.72.6",
     "react-native-element-dropdown": "^1.5.5",
     "react-native-safe-area-context": "^3.3.2",
-    "react-native-screens": "^3.10.1",
-    "react-native-vector-icons": "^9.0.0"
+    "react-native-screens": "^3.21.0",
+    "react-native-vector-icons": "10.0.0",
+    "utf8": "^3.0.0"
   },
   "devDependencies": {
-    "@babel/core": "^7.12.10",
-    "@babel/runtime": "^7.12.5",
+    "@babel/core": "^7.20.0",
+    "@babel/preset-env": "^7.20.0",
+    "@babel/runtime": "^7.20.0",
+    "@react-native/eslint-config": "^0.72.2",
+    "@react-native/metro-config": "^0.72.11",
+    "@types/base-64": "1.0.1",
     "@types/react-native-vector-icons": "6.4.10",
-    "babel-plugin-module-resolver": "^4.0.0",
-    "metro-react-native-babel-preset": "^0.64.0"
+    "@types/utf8": "3.0.1",
+    "babel-plugin-module-resolver": "^5.0.0",
+    "metro-react-native-babel-preset": "0.76.8"
   }
 }

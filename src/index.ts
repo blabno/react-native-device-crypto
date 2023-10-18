@@ -19,13 +19,21 @@ export interface KeyCreationParams {
 }
 
 export enum KeyTypes {
-  ASYMMETRIC = 0,
-  SYMMETRIC = 1,
+  SIGNING = 0,
+  SYMMETRIC_ENCRYPTION = 1,
   ASYMMETRIC_ENCRYPTION = 2,
 }
+
+export interface LargeBytesAsymmetricEncryptionResult {
+  cipherText: string,
+  encryptedPassword: string,
+  salt: string,
+  initializationVector: string,
+}
+
 export interface EncryptionResult {
-  iv: string;
-  encryptedText: string;
+  initializationVector: string;
+  cipherText: string;
 }
 
 export enum BiometryType {
@@ -52,13 +60,13 @@ const DeviceCrypto = {
    *
    * @return {Promise} Resolves to public key when successful
    */
-  async getOrCreateAsymmetricKey(
+  async getOrCreateSigningKey(
     alias: string,
     options: KeyCreationParams
   ): Promise<string> {
     return RNDeviceCrypto.createKey(alias, {
       ...options,
-      keyType: KeyTypes.ASYMMETRIC,
+      keyType: KeyTypes.SIGNING
     });
   },
 
@@ -70,13 +78,23 @@ const DeviceCrypto = {
    *
    * @return {Promise} Resolves to `true` when successful
    */
-  async getOrCreateSymmetricKey(
+  async getOrCreateSymmetricEncryptionKey(
     alias: string,
     options: KeyCreationParams
   ): Promise<boolean> {
     return RNDeviceCrypto.createKey(alias, {
       ...options,
-      keyType: KeyTypes.SYMMETRIC,
+      keyType: KeyTypes.SYMMETRIC_ENCRYPTION
+    });
+  },
+
+  async getOrCreateAsymmetricEncryptionKey(
+    alias: string,
+    options: KeyCreationParams
+  ): Promise<string> {
+    return RNDeviceCrypto.createKey(alias, {
+      ...options,
+      keyType: KeyTypes.ASYMMETRIC_ENCRYPTION
     });
   },
 
@@ -92,11 +110,21 @@ const DeviceCrypto = {
   /**
    * Get the public key as PEM formatted
    *
-   * @return {Promise} Resolves to public key when successful
+   * @return {Promise} Resolves to a public key when successful
    */
-  async getPublicKey(alias: string): Promise<string> {
-    return RNDeviceCrypto.getPublicKey(alias);
+  async getPublicKeyPEM(alias: string): Promise<string> {
+    return RNDeviceCrypto.getPublicKeyPEM(alias);
   },
+
+  /**
+   * Get the public key in Base64 encoded DER format
+   *
+   * @return {Promise} Resolves to a public key when successful
+   */
+  async getPublicKeyDER(alias: string): Promise<string> {
+    return RNDeviceCrypto.getPublicKeyDER(alias);
+  },
+
 
   /**
    * Signs the given text with given private key
@@ -112,18 +140,41 @@ const DeviceCrypto = {
     return RNDeviceCrypto.sign(alias, plainText, options);
   },
 
+  async encryptAsymmetrically(
+    publicKey: string,
+    plainText: string
+  ): Promise<string> {
+    return RNDeviceCrypto.encryptAsymmetrically(publicKey, plainText);
+  },
+
+  async encryptLargeBytesAsymmetrically(
+    publicKey: string,
+    plainText: string
+  ): Promise<LargeBytesAsymmetricEncryptionResult> {
+    return RNDeviceCrypto.encryptLargeBytesAsymmetrically(publicKey, plainText);
+  },
+
+  async decryptLargeBytesAsymmetrically(alias: string, encryptedData: LargeBytesAsymmetricEncryptionResult, options: BiometryParams): Promise<string> {
+    const {encryptedPassword, salt, cipherText, initializationVector} = encryptedData;
+    return RNDeviceCrypto.decryptLargeBytesAsymmetrically(alias, cipherText, encryptedPassword, salt, initializationVector, options);
+  },
+
+  async decryptAsymmetrically(alias: string, cipherText: string, options: BiometryParams): Promise<string> {
+    return RNDeviceCrypto.decryptAsymmetrically(alias, cipherText, options);
+  },
+
   /**
    * Encrypt the given text
    *
-   * @param {String} plainText Text to be encrypted
+   * @param {String} base64bytesToEncrypt Text to be encrypted
    * @return {Promise} Resolves to encrypted text `Base64` formatted
    */
-  async encrypt(
+  async encryptSymmetrically(
     alias: string,
-    plainText: string,
+    base64bytesToEncrypt: string,
     options: BiometryParams
   ): Promise<EncryptionResult> {
-    return RNDeviceCrypto.encrypt(alias, plainText, options);
+    return RNDeviceCrypto.encryptSymmetrically(alias, base64bytesToEncrypt, options);
   },
 
   /**
@@ -133,13 +184,13 @@ const DeviceCrypto = {
    * @param {String} iv Base64 formatted IV
    * @return {Promise} Resolves to decrypted text when successful
    */
-  async decrypt(
+  async decryptSymmetrically(
     alias: string,
     plainText: string,
     iv: string,
     options: BiometryParams
   ): Promise<string> {
-    return RNDeviceCrypto.decrypt(alias, plainText, iv, options);
+    return RNDeviceCrypto.decryptSymmetrically(alias, plainText, iv, options);
   },
 
   /**
@@ -147,8 +198,8 @@ const DeviceCrypto = {
    *
    * @return {Promise} Resolves to `true` if exists
    */
-  async isKeyExists(alias: string, keyType: KeyTypes): Promise<boolean> {
-    return RNDeviceCrypto.isKeyExists(alias, keyType);
+  async isKeyExists(alias: string): Promise<boolean> {
+    return RNDeviceCrypto.isKeyExists(alias);
   },
 
   /**
@@ -184,12 +235,8 @@ const DeviceCrypto = {
    * @returns {Promise} Resolves `true` if user passes biometry or fallback pin
    */
   async authenticateWithBiometry(options: BiometryParams): Promise<boolean> {
-    try {
-      return RNDeviceCrypto.authenticateWithBiometry(options);
-    } catch (err: any) {
-      throw err;
-    }
-  },
+    return RNDeviceCrypto.authenticateWithBiometry(options);
+  }
 };
 
 export default DeviceCrypto;

@@ -1,5 +1,6 @@
 package com.reactnativedevicecrypto;
 
+import android.content.Context;
 import android.os.Build;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyInfo;
@@ -8,7 +9,6 @@ import android.util.Base64;
 import android.util.Log;
 
 import com.facebook.react.bridge.Arguments;
-import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
 
@@ -35,6 +35,8 @@ import java.security.spec.MGF1ParameterSpec;
 import java.security.spec.RSAKeyGenParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Arrays;
+import java.util.Map;
+import java.util.Optional;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
@@ -78,6 +80,21 @@ public class Helpers {
         int AUTHENTICATION_REQUIRED = 2;
     }
 
+    public static String getString(Map<String, Object> options, String key, String defaultValue) {
+        return Optional.ofNullable(options.get(key)).map(Object::toString).orElse(defaultValue);
+    }
+
+    public static int getInt(Map<String, Object> options, String key, int defaultValue) {
+        return Optional.ofNullable(options.get(key)).map(v -> {
+            if (v instanceof Integer) return (Integer) v;
+            try {
+                return Integer.parseInt(v.toString());
+            } catch (NumberFormatException ignore) {
+                return defaultValue;
+            }
+        }).orElse(defaultValue);
+    }
+
     public static String getError(Throwable e) {
         String errorMessage = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
         Log.e(RN_MODULE, errorMessage);
@@ -90,34 +107,25 @@ public class Helpers {
         return keyStore;
     }
 
-    public static KeyInfo getKeyInfo(@NonNull String alias, @KeyType.Types int keyType) throws Exception {
-        if (keyType == KeyType.SIGNING || keyType == KeyType.ASYMMETRIC_ENCRYPTION) {
-            Key key = getPrivateKeyRef(alias);
+    public static KeyInfo getKeyInfo(@NonNull String alias) throws Exception {
+        Key key = getKeyStore().getKey(alias, null);
+        if (key instanceof SecretKey) {
+            SecretKeyFactory secretKeyFactory = SecretKeyFactory.getInstance(key.getAlgorithm(), KEY_STORE);
+            return (KeyInfo) secretKeyFactory.getKeySpec((SecretKey) key, KeyInfo.class);
+        } else {
             KeyFactory factory = KeyFactory.getInstance(key.getAlgorithm(), KEY_STORE);
             return factory.getKeySpec(key, KeyInfo.class);
-        } else {
-            SecretKey secretKey = getSymmetricKeyRef(alias);
-            SecretKeyFactory secretKeyFactory = SecretKeyFactory.getInstance(secretKey.getAlgorithm(), KEY_STORE);
-            return (KeyInfo) secretKeyFactory.getKeySpec(secretKey, KeyInfo.class);
         }
     }
 
-    public static boolean isKeyExists(@NonNull String alias, @KeyType.Types int keyType) throws Exception {
+    public static boolean isKeyExists(@NonNull String alias) throws Exception {
         KeyStore keyStore = Helpers.getKeyStore();
-        if (!keyStore.containsAlias(alias)) {
-            return false;
-        }
-
-        if (keyType == KeyType.SIGNING || keyType == KeyType.ASYMMETRIC_ENCRYPTION) {
-            return (getPrivateKeyRef(alias) != null);
-        } else {
-            return (getSymmetricKeyRef(alias) != null);
-        }
+        return keyStore.containsAlias(alias);
     }
 
-    public static boolean doNonAuthenticatedCryptography(@NonNull String alias, @KeyType.Types int keyType, ReactApplicationContext context) throws Exception {
-        if (!Helpers.isKeyExists(alias, keyType)) throw new Exception(alias.concat(" is not exists in KeyStore"));
-        KeyInfo keyInfo = Helpers.getKeyInfo(alias, keyType);
+    public static boolean doNonAuthenticatedCryptography(@NonNull String alias, Context context) throws Exception {
+        if (!Helpers.isKeyExists(alias)) throw new Exception(alias.concat(" is not exists in KeyStore"));
+        KeyInfo keyInfo = Helpers.getKeyInfo(alias);
         if (keyInfo.isUserAuthenticationRequired()) {
             if (!Device.hasEnrolledBiometry(context)) throw new Exception("Device cannot sign/encrypt. (No biometry enrolled)");
             if (!Device.isAppGrantedToUseBiometry(context)) throw new Exception("The app is not granted to use biometry.");
@@ -180,7 +188,7 @@ public class Helpers {
 
     // ASYMMETRIC KEY METHODS
     public static PublicKey getOrCreateSigningKey(@NonNull String alias, @NonNull ReadableMap options) throws Exception {
-        if (isKeyExists(alias, KeyType.SIGNING)) {
+        if (isKeyExists(alias)) {
             return getPublicKeyRef(alias);
         }
 
@@ -192,7 +200,7 @@ public class Helpers {
     }
 
     public static PublicKey getOrCreateAsymmetricEncryptionKey(@NonNull String alias, @NonNull ReadableMap options) throws Exception {
-        if (isKeyExists(alias, KeyType.ASYMMETRIC_ENCRYPTION)) {
+        if (isKeyExists(alias)) {
             return getPublicKeyRef(alias);
         }
 
@@ -204,7 +212,7 @@ public class Helpers {
     }
 
     public static PublicKey getPublicKeyRef(@NonNull String alias) throws Exception {
-        if (!isKeyExists(alias, KeyType.SIGNING) && !isKeyExists(alias, KeyType.ASYMMETRIC_ENCRYPTION)) {
+        if (!isKeyExists(alias)) {
             throw new Exception(alias.concat(" not found in keystore"));
         }
         KeyStore keyStore = getKeyStore();
@@ -219,7 +227,7 @@ public class Helpers {
     }
 
     public static String getPublicKeyPEMFormatted(@NonNull String alias) throws Exception {
-        if (!isKeyExists(alias, KeyType.SIGNING) || !isKeyExists(alias, KeyType.ASYMMETRIC_ENCRYPTION)) {
+        if (!isKeyExists(alias)) {
             return null;
         }
         PublicKey publicKey = getPublicKeyRef(alias);
@@ -246,7 +254,7 @@ public class Helpers {
     // SYMMETRIC KEY METHODS
     // ______________________________________________
     public static SecretKey getOrCreateSymmetricEncryptionKey(@NonNull String alias, @NonNull ReadableMap options) throws Exception {
-        if (isKeyExists(alias, KeyType.SYMMETRIC_ENCRYPTION)) {
+        if (isKeyExists(alias)) {
             return getSymmetricKeyRef(alias);
         }
 
@@ -312,11 +320,7 @@ public class Helpers {
         return cipher;
     }
 
-    public static EncryptionResult encrypt(@NonNull String textToBeEncrypted, @NonNull Cipher cipher) throws Exception {
-        return encryptBytes(textToBeEncrypted.getBytes(UTF_8),cipher);
-    }
-
-    public static EncryptionResult encryptBytes(@NonNull byte[] bytesToEncrypt, @NonNull Cipher cipher) throws Exception {
+    public static EncryptionResult encrypt(@NonNull byte[] bytesToEncrypt, @NonNull Cipher cipher) throws Exception {
         byte[] encryptedBytes = cipher.doFinal(bytesToEncrypt);
         byte[] iv = cipher.getIV();
         return new EncryptionResult(encryptedBytes, iv);
@@ -353,8 +357,8 @@ public class Helpers {
 
     public static void write(EncryptionResult encryptionResult, WritableMap map) {
         if (null != encryptionResult.initializationVector)
-            map.putString("iv", Base64.encodeToString(encryptionResult.initializationVector, Base64.NO_WRAP));
-        map.putString("encryptedText", Base64.encodeToString(encryptionResult.cipherText, Base64.NO_WRAP));
+            map.putString("initializationVector", Base64.encodeToString(encryptionResult.initializationVector, Base64.NO_WRAP));
+        map.putString("cipherText", Base64.encodeToString(encryptionResult.cipherText, Base64.NO_WRAP));
     }
 
     public static class EncryptionResult {

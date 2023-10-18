@@ -7,43 +7,43 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'column',
     justifyContent: 'flex-start',
-    alignItems: 'stretch',
+    alignItems: 'stretch'
   },
   infoBoxes: {
     flex: 1,
     flexDirection: 'row',
     justifyContent: 'center',
-    alignItems: 'center',
+    alignItems: 'center'
   },
   box: {
     flex: 0.5,
-    alignItems: 'center',
+    alignItems: 'center'
   },
 
   result: {
     marginTop: 8,
     padding: 10,
-    backgroundColor: '#996600',
+    backgroundColor: '#996600'
   },
   errorBox: {
     marginTop: 8,
     padding: 10,
-    backgroundColor: '#FF6644',
+    backgroundColor: '#FF6644'
   },
   switchBox: {
     flexDirection: 'row',
-    marginVertical: 4,
+    marginVertical: 4
   },
   switchBoxText: {
-    flex: 0.85,
+    flex: 0.85
   },
   switchBoxSwitch: {
-    flex: 0.15,
+    flex: 0.15
   },
   separator: {
     marginVertical: 4,
     borderBottomColor: '#434343',
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth
   },
   input: {
     marginBottom: 4,
@@ -51,32 +51,38 @@ const styles = StyleSheet.create({
     borderColor: '#A8A8A8',
     backgroundColor: '#F8F8F8',
     paddingVertical: 5,
-    paddingHorizontal: 10,
+    paddingHorizontal: 10
   },
   hint: {
     fontSize: 10,
     color: '#666666',
-    fontStyle: 'italic',
+    fontStyle: 'italic'
   },
   positive: {
     color: 'green',
     marginVertical: 10,
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: 'bold'
   },
   negative: {
     color: 'red',
     marginVertical: 10,
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: 'bold'
   },
   dropdown: {
     backgroundColor: '#F8F8F8',
     borderColor: '#A8A8A8',
     borderWidth: 0.5,
     marginVertical: 8,
-    paddingHorizontal: 8,
+    paddingHorizontal: 8
   },
+  largeBytes: {
+    marginVertical: 20,
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between'
+  }
 });
 
 export default styles;

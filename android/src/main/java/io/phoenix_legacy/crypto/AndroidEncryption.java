@@ -2,14 +2,13 @@ package io.phoenix_legacy.crypto;
 
 import android.app.Activity;
 
-import com.facebook.react.bridge.ReactApplicationContext;
-import com.facebook.react.bridge.ReadableMap;
 import com.reactnativedevicecrypto.Authenticator;
 import com.reactnativedevicecrypto.Helpers;
 
 import java.security.KeyStore;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
@@ -26,14 +25,11 @@ import androidx.biometric.BiometricPrompt;
 public class AndroidEncryption extends AbstractEncryption {
 
     private final Activity activity;
-    private final ReactApplicationContext context;
-    //TODO use Maps<String,Object>
-    private final ReadableMap options;
+    private final Map<String, Object> options;
     private final Random random;
 
-    public AndroidEncryption(@NonNull Activity activity, @NonNull ReactApplicationContext context, @NonNull ReadableMap options, @NonNull Random random) {
+    public AndroidEncryption(@NonNull Activity activity, @NonNull Map<String, Object> options, @NonNull Random random) {
         this.activity = activity;
-        this.context = context;
         this.options = options;
         this.random = random;
     }
@@ -58,7 +54,7 @@ public class AndroidEncryption extends AbstractEncryption {
             OAEPParameterSpec cipherAlgoParamSpec = getOAEPParameterSpec();
             Cipher asymmetricCipher = Cipher.getInstance(RSA_ALGORITHM);
             asymmetricCipher.init(Cipher.DECRYPT_MODE, privateKey, cipherAlgoParamSpec);
-            if (Helpers.doNonAuthenticatedCryptography(alias, Helpers.KeyType.ASYMMETRIC_ENCRYPTION, context)) {
+            if (Helpers.doNonAuthenticatedCryptography(alias, activity)) {
                 future.complete(asymmetricCipher);
             } else {
                 // Restricted key requires biometric authentication

@@ -3,9 +3,7 @@ package com.reactnativedevicecrypto;
 import android.app.Activity;
 import android.util.Log;
 
-import com.facebook.react.bridge.ReadableMap;
-import com.facebook.react.bridge.UiThreadUtil;
-
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -19,17 +17,18 @@ import static com.reactnativedevicecrypto.Constants.BIOMETRY_DESCRIPTION;
 import static com.reactnativedevicecrypto.Constants.BIOMETRY_SUBTITLE;
 import static com.reactnativedevicecrypto.Constants.BIOMETRY_TITLE;
 import static com.reactnativedevicecrypto.Constants.RN_MODULE;
+import static com.reactnativedevicecrypto.Helpers.getString;
 
 public class Authenticator {
   private static BiometricPrompt biometricPrompt;
 
-  public static CompletableFuture<BiometricPrompt.CryptoObject> authenticate(@NonNull ReadableMap options, @NonNull Activity activity) {
+  public static CompletableFuture<BiometricPrompt.CryptoObject> authenticate(@NonNull Map<String, Object> options, @NonNull Activity activity) {
     return authenticate(options, activity, null);
   }
 
-  public static CompletableFuture<BiometricPrompt.CryptoObject> authenticate(@NonNull ReadableMap options, @NonNull Activity activity, @Nullable BiometricPrompt.CryptoObject cryptoObject) {
+  public static CompletableFuture<BiometricPrompt.CryptoObject> authenticate(@NonNull Map<String, Object> options, @NonNull Activity activity, @Nullable BiometricPrompt.CryptoObject cryptoObject) {
     CompletableFuture<BiometricPrompt.CryptoObject> future = new CompletableFuture<>();
-    UiThreadUtil.runOnUiThread(new Runnable() {
+    activity.runOnUiThread(new Runnable() {
       @Override
       public void run() {
         try {
@@ -73,18 +72,10 @@ public class Authenticator {
             biometricPrompt.authenticate(promptInfo, cryptoObject);
           }
         } catch (Exception e) {
-          Log.e(RN_MODULE, e.getMessage());
+          Log.e(RN_MODULE, String.format("Failed to authenticate with biometry due to: %s", e.getMessage()));
         }
       }
     });
     return future;
-  }
-
-  private static String getString(ReadableMap options, String key, String defaultValue) {
-    String result = options.hasKey("biometryTitle") ? options.getString("biometryTitle") : BIOMETRY_TITLE;
-    if (options.hasKey(key)) {
-      result = options.getString(key);
-    }
-    return null == result ? defaultValue : result;
   }
 }
