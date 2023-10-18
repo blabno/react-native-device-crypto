@@ -12,7 +12,7 @@ import {
 import {Dropdown} from 'react-native-element-dropdown';
 import DeviceCrypto, {
     AccessLevel,
-    type LargeBytesAsymmetricEncryptionResult
+    type AsymmetricallyEncryptedLargeData
 } from 'react-native-device-crypto';
 import SwitchBox from './components/SwitchBox';
 import styles from './styles';
@@ -31,7 +31,7 @@ const AsymmetricEncryptionScreen: FC = () => {
     const [error, setError] = useState<string>();
     const [decryptedData, setDecryptedData] = useState<string>();
     const [encryptedLargeData, setEncryptedLargeData] =
-        useState<LargeBytesAsymmetricEncryptionResult>();
+        useState<AsymmetricallyEncryptedLargeData>();
     const [encryptedData, setEncryptedData] = useState<string>();
     const [textToBeEncrypted, setTextToBeEncrypted] =
         useState<string>('text to be encrypt');

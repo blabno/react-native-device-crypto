@@ -24,7 +24,7 @@ export enum KeyTypes {
   ASYMMETRIC_ENCRYPTION = 2,
 }
 
-export interface LargeBytesAsymmetricEncryptionResult {
+export interface AsymmetricallyEncryptedLargeData {
   cipherText: string,
   encryptedPassword: string,
   salt: string,
@@ -150,11 +150,11 @@ const DeviceCrypto = {
   async encryptLargeBytesAsymmetrically(
     publicKey: string,
     plainText: string
-  ): Promise<LargeBytesAsymmetricEncryptionResult> {
+  ): Promise<AsymmetricallyEncryptedLargeData> {
     return RNDeviceCrypto.encryptLargeBytesAsymmetrically(publicKey, plainText);
   },
 
-  async decryptLargeBytesAsymmetrically(alias: string, encryptedData: LargeBytesAsymmetricEncryptionResult, options: BiometryParams): Promise<string> {
+  async decryptLargeBytesAsymmetrically(alias: string, encryptedData: AsymmetricallyEncryptedLargeData, options: BiometryParams): Promise<string> {
     const {encryptedPassword, salt, cipherText, initializationVector} = encryptedData;
     return RNDeviceCrypto.decryptLargeBytesAsymmetrically(alias, cipherText, encryptedPassword, salt, initializationVector, options);
   },
