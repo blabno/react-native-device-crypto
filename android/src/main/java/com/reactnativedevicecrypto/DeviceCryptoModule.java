@@ -126,7 +126,7 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
 
       // Restricted key requires biometric authentication
       BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(signature);
-      Authenticator.authenticate(options, getCurrentActivity(), cryptoObject)
+      Authenticator.authenticate(options, requireCurrentActivity(), cryptoObject)
         .whenCompleteAsync((result, throwable) -> {
           if (null != throwable) {
             promise.reject(E_ERROR, Helpers.getError(throwable));
@@ -158,7 +158,7 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
 
       // Restricted key requires biometric authentication
       BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(cipher);
-      Authenticator.authenticate(options, getCurrentActivity(), cryptoObject)
+      Authenticator.authenticate(options, requireCurrentActivity(), cryptoObject)
         .whenCompleteAsync((result, throwable) -> {
           if (null != throwable) {
             promise.reject(E_ERROR, Helpers.getError(throwable));
@@ -234,7 +234,7 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
 
       // Restricted key requires biometric authentication
       BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(cipher);
-      Authenticator.authenticate(options, getCurrentActivity(), cryptoObject)
+      Authenticator.authenticate(options, requireCurrentActivity(), cryptoObject)
         .whenCompleteAsync((result, throwable) -> {
           if (null != throwable) {
             promise.reject(E_ERROR, Helpers.getError(throwable));
@@ -277,11 +277,6 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
     }
   }
 
-  @NonNull
-  private Activity requireCurrentActivity() {
-    return Objects.requireNonNull(getCurrentActivity(), "@ReactMethod should be called only in context of Activity");
-  }
-
   @ReactMethod
   public void decryptAsymmetrically(@NonNull String alias, @NonNull String cipherText, @NonNull ReadableMap options, @NonNull final Promise promise) {
     try {
@@ -296,7 +291,7 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
 
       // Restricted key requires biometric authentication
       BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(cipher);
-      Authenticator.authenticate(options, getCurrentActivity(), cryptoObject)
+      Authenticator.authenticate(options, requireCurrentActivity(), cryptoObject)
         .whenCompleteAsync((result, throwable) -> {
           if (null != throwable) {
             promise.reject(E_ERROR, Helpers.getError(throwable));
@@ -401,7 +396,7 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
   @ReactMethod
   public void authenticateWithBiometry(ReadableMap options, final Promise promise) {
     try {
-      Authenticator.authenticate(options, getCurrentActivity())
+      Authenticator.authenticate(options, requireCurrentActivity())
         .whenCompleteAsync((cryptoObject, throwable) -> {
           if (null != throwable) {
             promise.reject(E_ERROR, Helpers.getError(throwable));
@@ -420,6 +415,11 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
 
   private static String encodeBase64(byte[] data) {
     return Base64.encodeToString(data, Base64.NO_WRAP);
+  }
+
+  @NonNull
+  private Activity requireCurrentActivity() {
+    return Objects.requireNonNull(getCurrentActivity(), "@ReactMethod should be called only in context of Activity");
   }
 
 }
