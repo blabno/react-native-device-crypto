@@ -10,16 +10,21 @@ import {
     TextInput
 } from 'react-native';
 import {Dropdown} from 'react-native-element-dropdown';
-import DeviceCrypto, {
-    AccessLevel,
-    type AsymmetricallyEncryptedLargeData
-} from 'react-native-device-crypto';
+import DeviceCrypto, {AccessLevel} from 'react-native-device-crypto';
 import SwitchBox from './components/SwitchBox';
 import styles from './styles';
 import {type FC, useCallback, useState} from 'react';
 import base64 from 'base-64';
 import utf8 from 'utf8';
 import CopiableText from "./components/CopiableText";
+
+export interface AsymmetricallyEncryptedLargeData {
+  cipherText: string,
+  encryptedPassword: string,
+  iterations: number,
+  salt: string,
+  initializationVector: string,
+}
 
 export const accessLevelOptions = [
     {label: 'Always', value: 0},
@@ -47,6 +52,7 @@ const AsymmetricEncryptionScreen: FC = () => {
 
     const createKey = useCallback(async () => {
         try {
+          setError(undefined);
             const res = await DeviceCrypto.getOrCreateAsymmetricEncryptionKey(alias, {
                 accessLevel,
                 invalidateOnNewBiometry
@@ -67,6 +73,7 @@ const AsymmetricEncryptionScreen: FC = () => {
 
     const encrypt = useCallback(async () => {
         try {
+            setError(undefined);
             setEncryptedData(undefined);
             setDecryptedData(undefined);
             const publicKeyDER = await DeviceCrypto.getPublicKeyDER(alias);
@@ -74,11 +81,19 @@ const AsymmetricEncryptionScreen: FC = () => {
                 utf8.encode(textToBeEncrypted)
             );
             if (largeBytes) {
-                const res = await DeviceCrypto.encryptLargeBytesAsymmetrically(
-                    publicKeyDER,
-                    base64bytesToEncrypt
-                );
-                setEncryptedLargeData(res);
+              const password = await DeviceCrypto.getRandomBytes(190);
+              const salt = await DeviceCrypto.getRandomBytes(190);
+              const encryptedPassword = await DeviceCrypto.encryptAsymmetrically(publicKeyDER, password);
+              const iterations = 1024;
+              const {cipherText, initializationVector} = await DeviceCrypto.encryptSymmetricallyWithPasswordAndSalt(password, salt, iterations, base64bytesToEncrypt);
+              const result: AsymmetricallyEncryptedLargeData = {
+                cipherText,
+                encryptedPassword,
+                iterations,
+                initializationVector,
+                salt
+              };
+              setEncryptedLargeData(result);
             } else {
                 const res = await DeviceCrypto.encryptAsymmetrically(
                     publicKeyDER,
@@ -94,40 +109,35 @@ const AsymmetricEncryptionScreen: FC = () => {
 
     const decrypt = useCallback(async () => {
         try {
+            setError(undefined);
             setDecryptedData(undefined);
+            const options = {
+                biometryTitle: 'Authentication is required',
+                biometrySubTitle: 'Decryption',
+                biometryDescription: 'Authenticate your self to decrypt given data.'
+            };
             if (encryptedLargeData) {
-                const res = await DeviceCrypto.decryptLargeBytesAsymmetrically(
-                    alias,
-                    encryptedLargeData,
-                    {
-                        biometryTitle: 'Authentication is required',
-                        biometrySubTitle: 'Decryption',
-                        biometryDescription:
-                            'Authenticate your self to decrypt given data.'
-                    }
-                );
+                const password = await DeviceCrypto.decryptAsymmetrically(alias, encryptedLargeData.encryptedPassword, options);
+                const {cipherText, salt, iterations, initializationVector} = encryptedLargeData;
+                const res = await DeviceCrypto.decryptSymmetricallyWithPasswordAndSalt(password, salt, initializationVector, iterations, cipherText);
                 setDecryptedData(utf8.decode(base64.decode(res)));
             } else if (encryptedData) {
                 const res = await DeviceCrypto.decryptAsymmetrically(
                     alias,
                     encryptedData,
-                    {
-                        biometryTitle: 'Authentication is required',
-                        biometrySubTitle: 'Decryption',
-                        biometryDescription:
-                            'Authenticate your self to decrypt given data.'
-                    }
+                    options
                 );
                 setDecryptedData(utf8.decode(base64.decode(res)));
             }
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (err: any) {
-            setError(err.message);
+          setError(err.message);
         }
     }, [alias, encryptedData, encryptedLargeData]);
 
-    const deleteKey = async () => {
+  const deleteKey = async () => {
         try {
+            setError(undefined);
             await DeviceCrypto.deleteKey(alias);
             const res = await DeviceCrypto.isKeyExists(alias);
             setIsKeyExists(res);

@@ -24,13 +24,6 @@ export enum KeyTypes {
   ASYMMETRIC_ENCRYPTION = 2,
 }
 
-export interface AsymmetricallyEncryptedLargeData {
-  cipherText: string,
-  encryptedPassword: string,
-  salt: string,
-  initializationVector: string,
-}
-
 export interface EncryptionResult {
   initializationVector: string;
   cipherText: string;
@@ -125,72 +118,107 @@ const DeviceCrypto = {
     return RNDeviceCrypto.getPublicKeyDER(alias);
   },
 
+  /**
+   * Get random bytes Base64 encoded
+   *
+   * @return {Promise} Resolves base64 encoded bytes
+   */
+  async getRandomBytes(length: number): Promise<string> {
+    return RNDeviceCrypto.getRandomBytes(length);
+  },
+
 
   /**
-   * Signs the given text with given private key
+   * Signs the given Base64 encoded bytes with given private key
    *
-   * @param {String} plainText Text to be signed
+   * @param {String} payloadBase64 Text to be signed
    * @return {Promise} Resolves to signature in `Base64` when successful
    */
   async sign(
     alias: string,
-    plainText: string,
+    payloadBase64: string,
     options: BiometryParams
   ): Promise<string> {
-    return RNDeviceCrypto.sign(alias, plainText, options);
+    return RNDeviceCrypto.sign(alias, payloadBase64, options);
   },
 
   async encryptAsymmetrically(
-    publicKey: string,
-    plainText: string
+    publicKeyDER: string,
+    payloadBase64: string
   ): Promise<string> {
-    return RNDeviceCrypto.encryptAsymmetrically(publicKey, plainText);
+    return RNDeviceCrypto.encryptAsymmetrically(publicKeyDER, payloadBase64);
   },
 
-  async encryptLargeBytesAsymmetrically(
-    publicKey: string,
-    plainText: string
-  ): Promise<AsymmetricallyEncryptedLargeData> {
-    return RNDeviceCrypto.encryptLargeBytesAsymmetrically(publicKey, plainText);
-  },
-
-  async decryptLargeBytesAsymmetrically(alias: string, encryptedData: AsymmetricallyEncryptedLargeData, options: BiometryParams): Promise<string> {
-    const {encryptedPassword, salt, cipherText, initializationVector} = encryptedData;
-    return RNDeviceCrypto.decryptLargeBytesAsymmetrically(alias, cipherText, encryptedPassword, salt, initializationVector, options);
-  },
-
-  async decryptAsymmetrically(alias: string, cipherText: string, options: BiometryParams): Promise<string> {
-    return RNDeviceCrypto.decryptAsymmetrically(alias, cipherText, options);
+  async decryptAsymmetrically(alias: string, cipherTextBase64: string, options: BiometryParams): Promise<string> {
+    return RNDeviceCrypto.decryptAsymmetrically(alias, cipherTextBase64, options);
   },
 
   /**
-   * Encrypt the given text
+   * Encrypt given Base64 encoded bytes
    *
-   * @param {String} base64bytesToEncrypt Text to be encrypted
+   * @param {String} payloadBase64 data to be encrypted
    * @return {Promise} Resolves to encrypted text `Base64` formatted
    */
   async encryptSymmetrically(
     alias: string,
-    base64bytesToEncrypt: string,
+    payloadBase64: string,
     options: BiometryParams
   ): Promise<EncryptionResult> {
-    return RNDeviceCrypto.encryptSymmetrically(alias, base64bytesToEncrypt, options);
+    return RNDeviceCrypto.encryptSymmetrically(alias, payloadBase64, options);
+  },
+
+  /**
+   * Encrypt given Base64 encoded bytes
+   *
+   * @param {String} passwordBase64 password used to derive encryption key
+   * @param {String} saltBase64 salt used to derive encryption key
+   * @param {number} iterations number of iterations used to derive encryption key
+   * @param {String} payloadBase64 data to be encrypted
+   * @return {Promise} Resolves to encrypted text `Base64` formatted
+   */
+  async encryptSymmetricallyWithPasswordAndSalt(
+    passwordBase64: string,
+    saltBase64: string,
+    iterations: number,
+    payloadBase64: string
+  ): Promise<EncryptionResult> {
+    return RNDeviceCrypto.encryptSymmetricallyWithPasswordAndSalt(passwordBase64, saltBase64, iterations, payloadBase64);
+  },
+
+  /**
+   * Decrypt given Base64 encoded bytes
+   *
+   * @param {String} passwordBase64 password used to derive encryption key
+   * @param {String} saltBase64 salt used to derive encryption key
+   * @param {String} ivBase64 initialization vector used to derive encryption key
+   * @param {number} iterations number of iterations used to derive encryption key
+   * @param {String} cipherTextBase64 data to be decrypted
+   * @return {Promise} Resolves to decrypted text `Base64` formatted
+   */
+  async decryptSymmetricallyWithPasswordAndSalt(
+    passwordBase64: string,
+    saltBase64: string,
+    ivBase64: string,
+    iterations: number,
+    cipherTextBase64: string
+  ): Promise<string> {
+    return RNDeviceCrypto.decryptSymmetricallyWithPasswordAndSalt(passwordBase64, saltBase64, ivBase64, iterations, cipherTextBase64);
   },
 
   /**
    * Decrypt the encrypted text with given IV
    *
-   * @param {String} plainText Text to be signed
-   * @param {String} iv Base64 formatted IV
+   * @param {String} cipherTextBase64 Text to be signed
+   * @param {String} ivBase64 Base64 formatted IV
    * @return {Promise} Resolves to decrypted text when successful
    */
   async decryptSymmetrically(
     alias: string,
-    plainText: string,
-    iv: string,
+    cipherTextBase64: string,
+    ivBase64: string,
     options: BiometryParams
   ): Promise<string> {
-    return RNDeviceCrypto.decryptSymmetrically(alias, plainText, iv, options);
+    return RNDeviceCrypto.decryptSymmetrically(alias, cipherTextBase64, ivBase64, options);
   },
 
   /**

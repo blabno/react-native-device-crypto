@@ -79,7 +79,7 @@ const SymmetricScreen: FC = () => {
                 biometrySubTitle: 'Encryption',
                 biometryDescription: 'Authenticate your self to encrypt given text.'
             });
-            setDecryptedText(res);
+            setDecryptedText(utf8.decode(base64.decode(res)));
         } catch (err) {
             handleError(err);
         }

@@ -1,7 +1,10 @@
 package com.reactnativedevicecrypto;
 
 import android.app.Activity;
+import android.content.Context;
+import android.security.keystore.KeyInfo;
 import android.util.Base64;
+import android.util.Log;
 
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.Promise;
@@ -12,23 +15,25 @@ import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.module.annotations.ReactModule;
 
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
 
-import java.security.KeyStore;
+import java.security.KeyFactory;
+import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
 import java.security.SecureRandom;
-import java.security.Security;
 import java.security.Signature;
-import java.util.Collections;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.Objects;
+import java.util.Optional;
 
+import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.SecretKey;
 
 import androidx.annotation.NonNull;
 import androidx.biometric.BiometricPrompt;
-import io.phoenix_legacy.crypto.AbstractEncryption;
-import io.phoenix_legacy.crypto.AndroidEncryption;
 
 import static com.reactnativedevicecrypto.Constants.BIOMETRY;
 import static com.reactnativedevicecrypto.Constants.E_ERROR;
@@ -37,6 +42,7 @@ import static com.reactnativedevicecrypto.Constants.IRIS;
 import static com.reactnativedevicecrypto.Constants.NONE;
 import static com.reactnativedevicecrypto.Constants.NOT_PROTECTED;
 import static com.reactnativedevicecrypto.Constants.PIN_OR_PATTERN;
+import static com.reactnativedevicecrypto.Constants.RN_MODULE;
 import static com.reactnativedevicecrypto.Constants.TOUCH;
 
 @SuppressWarnings({"unused", "SameParameterValue"})
@@ -44,14 +50,13 @@ import static com.reactnativedevicecrypto.Constants.TOUCH;
 public class DeviceCryptoModule extends ReactContextBaseJavaModule {
   public static final String NAME = "DeviceCrypto";
 
+  private final AndroidCrypto crypto;
   private final SecureRandom random;
 
   public DeviceCryptoModule(ReactApplicationContext reactContext) {
     super(reactContext);
+    crypto = new AndroidCrypto();
     random = new SecureRandom();
-    if (null == Security.getProvider(BouncyCastleProvider.PROVIDER_NAME)) {
-      Security.insertProviderAt(new BouncyCastleProvider(), 1);
-    }
   }
 
   @Override
@@ -65,244 +70,226 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
   // ______________________________________________
   @ReactMethod
   public void createKey(@NonNull String alias, @NonNull ReadableMap options, @NonNull final Promise promise) {
-    int keyType = options.hasKey("keyType") ? options.getInt("keyType") : Helpers.KeyType.SIGNING;
+    KeyType keyType = options.hasKey("keyType") ? KeyType.fromInt(options.getInt("keyType")) : KeyType.SIGNING;
+
     ReactApplicationContext context = getReactApplicationContext();
 
     try {
-      if (!Device.isCompatible(context, options.toHashMap())) {
+      boolean invalidateOnNewBiometry = options.hasKey("invalidateOnNewBiometry") && options.getBoolean("invalidateOnNewBiometry");
+      AndroidCrypto.AccessLevel accessLevel = options.hasKey("accessLevel") ? AndroidCrypto.AccessLevel.fromInt(options.getInt("accessLevel")) : AndroidCrypto.AccessLevel.ALWAYS;
+      if (!isCompatible(context, accessLevel)) {
         throw new Exception("The device cannot meet requirements. (Eg: not pin/pass protected or no biometry has been enrolled.");
       }
 
-      if (keyType == Helpers.KeyType.SIGNING) {
-        PublicKey publicKey = Helpers.getOrCreateSigningKey(alias, options);
-        if (publicKey == null) {
-          throw new Exception("Public key is null.");
-        }
-        promise.resolve(Helpers.getPublicKeyPEMFormatted(alias));
-      } else if (keyType == Helpers.KeyType.ASYMMETRIC_ENCRYPTION) {
-        PublicKey publicKey = Helpers.getOrCreateAsymmetricEncryptionKey(alias, options);
-        if (publicKey == null) {
-          throw new Exception("Public key is null.");
-        }
-        promise.resolve(Helpers.getPublicKeyPEMFormatted(alias));
+      if (KeyType.SIGNING.equals(keyType)) {
+        PublicKey publicKey = crypto.createSigningKey(alias, accessLevel, invalidateOnNewBiometry);
+        promise.resolve(getPublicKeyPEMFormatted(publicKey));
+      } else if (KeyType.ASYMMETRIC_ENCRYPTION.equals(keyType)) {
+        PublicKey publicKey = crypto.createAsymmetricEncryptionKey(alias, accessLevel, invalidateOnNewBiometry);
+        promise.resolve(getPublicKeyPEMFormatted(publicKey));
       } else {
-        SecretKey secretKey = Helpers.getOrCreateSymmetricEncryptionKey(alias, options);
-        if (secretKey == null) {
-          throw new Exception("Secret key is null.");
-        }
+        SecretKey secretKey = crypto.createSymmetricEncryptionKey(alias, accessLevel, invalidateOnNewBiometry);
         promise.resolve(true);
       }
     } catch (Exception e) {
-      promise.reject(E_ERROR, Helpers.getError(e));
+      promise.reject(E_ERROR, getError(e, "Failed to create key"));
     }
   }
 
   @ReactMethod
   public void deleteKey(@NonNull String alias, @NonNull final Promise promise) {
     try {
-      KeyStore keyStore = Helpers.getKeyStore();
-      keyStore.deleteEntry(alias);
+      crypto.deleteKey(alias);
       promise.resolve(true);
     } catch (Exception e) {
-      promise.reject(E_ERROR, Helpers.getError(e));
+      promise.reject(E_ERROR, getError(e, "Failed to delete key"));
     }
   }
 
   @ReactMethod
-  public void sign(@NonNull String alias, String plainText, ReadableMap options, @NonNull final Promise promise) {
+  public void sign(@NonNull String alias, String payload, ReadableMap options, @NonNull final Promise promise) {
+    String errorMessage = "Failed to sign";
     try {
       ReactApplicationContext context = getReactApplicationContext();
-      Signature signature = Helpers.initializeSignature(alias);
+      Signature signature = crypto.initializeSignature(alias);
 
-      // Key usage doesn't require biometric authentication (unrestricted)
-      if (Helpers.doNonAuthenticatedCryptography(alias, context)) {
-        String signatureOfTheText = Helpers.sign(plainText, signature);
-        if (signatureOfTheText.isEmpty()) {
-          throw new Exception("Couldn't sign the text");
-        }
-        promise.resolve(signatureOfTheText);
+      byte[] payloadBytes = decodeBase64(payload);
+      KeyInfo keyInfo = crypto.getKeyInfo(alias);
+      if (!keyInfo.isUserAuthenticationRequired()) {
+        byte[] signatureBytes = crypto.sign(payloadBytes, signature);
+        promise.resolve(encodeBase64(signatureBytes));
         return;
       }
 
-      // Restricted key requires biometric authentication
+      checkKeyCompatibility(keyInfo, context);
+
       BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(signature);
       Authenticator.authenticate(options.toHashMap(), requireCurrentActivity(), cryptoObject)
         .whenCompleteAsync((result, throwable) -> {
           if (null != throwable) {
-            promise.reject(E_ERROR, Helpers.getError(throwable));
+            promise.reject(E_ERROR, getError(throwable, errorMessage));
             return;
           }
           try {
-            promise.resolve(Helpers.sign(plainText, Objects.requireNonNull(result.getSignature())));
+            byte[] signatureBytes = crypto.sign(payloadBytes, Objects.requireNonNull(result.getSignature()));
+            promise.resolve(encodeBase64(signatureBytes));
           } catch (Exception e) {
-            promise.reject(E_ERROR, Helpers.getError(e));
+            promise.reject(E_ERROR, getError(e, errorMessage));
           }
         });
     } catch (Exception e) {
-      promise.reject(E_ERROR, Helpers.getError(e));
+      promise.reject(E_ERROR, getError(e, errorMessage));
     }
   }
 
   @ReactMethod
-  public void encryptSymmetrically(@NonNull String alias, String base64bytesToEncrypt, ReadableMap options, @NonNull final Promise promise) {
+  public void encryptSymmetrically(@NonNull String alias, String payload, ReadableMap options, @NonNull final Promise promise) {
+    String errorMessage = "Failed to encrypt symmetrically";
     try {
       ReactApplicationContext context = getReactApplicationContext();
-      byte[] bytesToEncrypt = Base64.decode(base64bytesToEncrypt, Base64.NO_WRAP);
-      Cipher cipher = Helpers.initializeEncrypter(alias);
+      byte[] bytesToEncrypt = decodeBase64(payload);
+      Cipher cipher = crypto.initializeSymmetricCipherForEncryption(alias);
 
-      // Key usage doesn't require biometric authentication (unrestricted)
-      if (Helpers.doNonAuthenticatedCryptography(alias, context)) {
-        Helpers.EncryptionResult result = Helpers.encrypt(bytesToEncrypt, cipher);
-        promise.resolve(Helpers.toWritableMap(result));
+      KeyInfo keyInfo = crypto.getKeyInfo(alias);
+      if (!keyInfo.isUserAuthenticationRequired()) {
+        EncryptionResult result = encrypt(bytesToEncrypt, cipher);
+        promise.resolve(toWritableMap(result));
         return;
       }
 
-      // Restricted key requires biometric authentication
+      checkKeyCompatibility(keyInfo, context);
+
       BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(cipher);
       Authenticator.authenticate(options.toHashMap(), requireCurrentActivity(), cryptoObject)
         .whenCompleteAsync((result, throwable) -> {
           if (null != throwable) {
-            promise.reject(E_ERROR, Helpers.getError(throwable));
+            promise.reject(E_ERROR, getError(throwable, errorMessage));
             return;
           }
           try {
-              Helpers.EncryptionResult encryptionResult = Helpers.encrypt(bytesToEncrypt, Objects.requireNonNull(result.getCipher()));
-              promise.resolve(Helpers.toWritableMap(encryptionResult));
+              EncryptionResult encryptionResult = encrypt(bytesToEncrypt, Objects.requireNonNull(result.getCipher()));
+              promise.resolve(toWritableMap(encryptionResult));
           } catch (Exception e) {
-            promise.reject(E_ERROR, Helpers.getError(e));
+            promise.reject(E_ERROR, getError(e, errorMessage));
           }
         });
     } catch (Exception e) {
-      promise.reject(E_ERROR, Helpers.getError(e));
+      promise.reject(E_ERROR, getError(e, errorMessage));
+    }
+  }
+
+  @ReactMethod
+  public void encryptSymmetricallyWithPasswordAndSalt(@NonNull String password, @NonNull String salt, int iterations, String payload, @NonNull final Promise promise) {
+    String errorMessage = "Failed to encrypt symmetrically with password and salt";
+    try {
+      ReactApplicationContext context = getReactApplicationContext();
+      byte[] bytesToEncrypt = decodeBase64(payload);
+      SecretKey secretKey = crypto.deriveSecretKey(decodeBase64(password), decodeBase64(salt), iterations);
+      Cipher cipher = crypto.initializeSymmetricCipherForEncryption(secretKey);
+      EncryptionResult result = encrypt(bytesToEncrypt, cipher);
+      promise.resolve(toWritableMap(result));
+    } catch (Exception e) {
+      promise.reject(E_ERROR, getError(e, errorMessage));
     }
   }
 
   @ReactMethod
   public void encryptAsymmetrically(@NonNull String publicKeyDER, @NonNull String payload, @NonNull final Promise promise) {
     try {
-      PublicKey publicKey = Helpers.decodeBase64PublicKeyASN1(publicKeyDER);
-      byte[] bytesToEncrypt = Base64.decode(payload, Base64.NO_WRAP);
-      Cipher cipher = Helpers.initializeAsymmetricEncrypter(publicKey);
-      Helpers.EncryptionResult result = Helpers.encrypt(bytesToEncrypt, cipher);
+      PublicKey publicKey = decodePublicKeyASN1(decodeBase64(publicKeyDER));
+      byte[] bytesToEncrypt = decodeBase64(payload);
+      Cipher cipher = crypto.initializeAsymmetricCipherForEncryption(publicKey);
+      EncryptionResult result = encrypt(bytesToEncrypt, cipher);
       promise.resolve(encodeBase64(result.cipherText));
     } catch (Exception e) {
-      promise.reject(E_ERROR, Helpers.getError(e));
-    }
-  }
-    /**
-     * Generates random password, salt and initialization vector. Password and salt are used
-     * to derive symmetric secret key, which is used to encrypt payload.
-     * <p>
-     * The result is a map containing salt, password, iv and encryptedText.
-     *
-     * @param publicKeyDER base64 encoded DER representation of public key
-     * @param payload base64 encoded bytes of payload to be encrypted
-     * @param promise promise to return result through
-     */
-  @ReactMethod
-  public void encryptLargeBytesAsymmetrically(@NonNull String publicKeyDER, @NonNull String payload, @NonNull final Promise promise) {
-    try {
-      ReactApplicationContext context = getReactApplicationContext();
-      Activity currentActivity = requireCurrentActivity();
-      byte[] publicKeyBytes = decodeBase64(publicKeyDER);
-      byte[] bytesToEncrypt = decodeBase64(payload);
-      AbstractEncryption.AsymmetricallyEncryptedData encryptedData = new AndroidEncryption(currentActivity, Collections.emptyMap(), random).encryptLargeBytesAsymmetrically(bytesToEncrypt, publicKeyBytes);
-      WritableMap result = Arguments.createMap();
-
-      result.putString("salt", encodeBase64(encryptedData.getSalt()));
-      result.putString("encryptedPassword", encodeBase64(encryptedData.getEncryptedPassword()));
-      result.putString("initializationVector", encodeBase64(encryptedData.getIv()));
-      result.putString("cipherText", encodeBase64(encryptedData.getCipherText()));
-      promise.resolve(result);
-    } catch (Exception e) {
-      promise.reject(E_ERROR, Helpers.getError(e));
+      promise.reject(E_ERROR, getError(e, "Failed to encrypt asymmetrically"));
     }
   }
 
   @ReactMethod
-  public void decryptSymmetrically(@NonNull String alias, @NonNull String plainText, String ivDecoded, @NonNull ReadableMap options, @NonNull final Promise promise) {
+  public void decryptSymmetrically(@NonNull String alias, @NonNull String cipherText, String iv, @NonNull ReadableMap options, @NonNull final Promise promise) {
+    String errorMessage = "Failed to decrypt symmetrically";
     try {
       ReactApplicationContext context = getReactApplicationContext();
-      Cipher cipher = Helpers.initializeDecrypter(alias, ivDecoded);
+      Cipher cipher = crypto.initializeSymmetricCipherForDecryption(alias, decodeBase64(iv));
 
-      // Key usage doesn't require biometric authentication (unrestricted)
-      if (Helpers.doNonAuthenticatedCryptography(alias, context)) {
-        promise.resolve(Helpers.decrypt(plainText, cipher));
+      byte[] cipherTextBytes = decodeBase64(cipherText);
+      KeyInfo keyInfo = crypto.getKeyInfo(alias);
+      if (!keyInfo.isUserAuthenticationRequired()) {
+        byte[] result = cipher.doFinal(cipherTextBytes);
+        promise.resolve(encodeBase64(result));
         return;
       }
 
-      // Restricted key requires biometric authentication
+      checkKeyCompatibility(keyInfo, context);
+
       BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(cipher);
       Authenticator.authenticate(options.toHashMap(), requireCurrentActivity(), cryptoObject)
         .whenCompleteAsync((result, throwable) -> {
           if (null != throwable) {
-            promise.reject(E_ERROR, Helpers.getError(throwable));
+            promise.reject(E_ERROR, getError(throwable, errorMessage));
             return;
           }
           try {
-            promise.resolve(Helpers.decrypt(plainText, Objects.requireNonNull(result.getCipher())));
+            byte[] decryptedBytes = Objects.requireNonNull(result.getCipher()).doFinal(cipherTextBytes);
+            promise.resolve(encodeBase64(decryptedBytes));
           } catch (Exception e) {
-            promise.reject(E_ERROR, Helpers.getError(e));
+            promise.reject(E_ERROR, getError(e, errorMessage));
           }
         });
     } catch (Exception e) {
-      promise.reject(E_ERROR, Helpers.getError(e));
+      promise.reject(E_ERROR, getError(e, errorMessage));
     }
   }
 
-    /**
-     * Decrypts cipherText using initialization vector and symmetric key derived from salt, password.
-     * Password comes from asymmetrically decrypting encryptedPassword using key designated by alias.
-     *
-     * @param alias alias of key to decrypt encryptedPassword
-     * @param encryptedPassword base64 encoded bytes of encrypted encryptedPassword
-     * @param salt base64 encoded salt
-     * @param cipherText base64 encoded cipherText
-     * @param iv base64 encoded initialization vector
-     * @param options biometry options
-     * @param promise promise to return result through
-     */
   @ReactMethod
-  public void decryptLargeBytesAsymmetrically(@NonNull String alias, @NonNull String cipherText, @NonNull String encryptedPassword, @NonNull String salt, @NonNull String iv, @NonNull ReadableMap options, @NonNull final Promise promise) {
+  public void decryptSymmetricallyWithPasswordAndSalt(@NonNull String password, @NonNull String salt, @NonNull String iv, int iterations, String cipherText, @NonNull final Promise promise) {
+    String errorMessage = "Failed to encrypt symmetrically with password and salt";
     try {
       ReactApplicationContext context = getReactApplicationContext();
-      AbstractEncryption.AsymmetricallyEncryptedData encryptedData = new AbstractEncryption.AsymmetricallyEncryptedData(decodeBase64(cipherText), decodeBase64(encryptedPassword), decodeBase64(salt), decodeBase64(iv));
-      Activity currentActivity = requireCurrentActivity();
-      byte[] decryptedBytes = new AndroidEncryption(currentActivity, options.toHashMap(), random).decryptLargeBytesAsymmetrically(alias, encryptedData);
-      promise.resolve(encodeBase64(decryptedBytes));
+      byte[] cipherTextBytes = decodeBase64(cipherText);
+      SecretKey secretKey = crypto.deriveSecretKey(decodeBase64(password), decodeBase64(salt), iterations);
+      Cipher cipher = crypto.initializeSymmetricCipherForDecryption(secretKey, decodeBase64(iv));
+      byte[] result = cipher.doFinal(cipherTextBytes);
+      promise.resolve(encodeBase64(result));
     } catch (Exception e) {
-      promise.reject(E_ERROR, Helpers.getError(e));
+      promise.reject(E_ERROR, getError(e, errorMessage));
     }
   }
 
   @ReactMethod
   public void decryptAsymmetrically(@NonNull String alias, @NonNull String cipherText, @NonNull ReadableMap options, @NonNull final Promise promise) {
+    String errorMessage = "Failed to decrypt asymmetrically";
     try {
+      byte[] cipherTextBytes = decodeBase64(cipherText);
       ReactApplicationContext context = getReactApplicationContext();
-      Cipher cipher = Helpers.initializeAsymmetricDecrypter(alias);
+      Cipher cipher = crypto.initializeAsymmetricCipherForDecryption(alias);
 
-      // Key usage doesn't require biometric authentication (unrestricted)
-      if (Helpers.doNonAuthenticatedCryptography(alias, context)) {
-        promise.resolve(Helpers.decryptBytes(cipherText, cipher));
+      KeyInfo keyInfo = crypto.getKeyInfo(alias);
+      if (!keyInfo.isUserAuthenticationRequired()) {
+        byte[] result = cipher.doFinal(cipherTextBytes);
+        promise.resolve(encodeBase64(result));
         return;
       }
 
-      // Restricted key requires biometric authentication
+      checkKeyCompatibility(keyInfo, context);
+
       BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(cipher);
       Authenticator.authenticate(options.toHashMap(), requireCurrentActivity(), cryptoObject)
         .whenCompleteAsync((result, throwable) -> {
           if (null != throwable) {
-            promise.reject(E_ERROR, Helpers.getError(throwable));
+            promise.reject(E_ERROR, getError(throwable, errorMessage));
             return;
           }
           try {
-            promise.resolve(Helpers.decryptBytes(cipherText, Objects.requireNonNull(result.getCipher())));
+            byte[] decryptedBytes = Objects.requireNonNull(result.getCipher()).doFinal(cipherTextBytes);
+            promise.resolve(encodeBase64(decryptedBytes));
           } catch (Exception e) {
-            promise.reject(E_ERROR, Helpers.getError(e));
+            promise.reject(E_ERROR, getError(e, errorMessage));
           }
         });
     } catch (Exception e) {
-      promise.reject(E_ERROR, Helpers.getError(e));
+      promise.reject(E_ERROR, getError(e, errorMessage));
     }
   }
 
@@ -310,31 +297,42 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
   // HELPERS
   // ______________________________________________
   @ReactMethod
+  public void getRandomBytes(int length, @NonNull final Promise promise) {
+    try {
+      byte[] bytes = new byte[length];
+      random.nextBytes(bytes);
+      promise.resolve(encodeBase64(bytes));
+    } catch (Exception e) {
+      promise.reject(E_ERROR, getError(e, "Failed to get public key PEM"));
+    }
+  }
+
+  @ReactMethod
   public void getPublicKeyPEM(@NonNull String alias, @NonNull final Promise promise) {
     try {
-      promise.resolve(Helpers.getPublicKeyPEMFormatted(alias));
+      promise.resolve(getPublicKeyPEMFormatted(Objects.requireNonNull(crypto.getPublicKey(alias), "Key not found")));
     } catch (Exception e) {
-      promise.reject(E_ERROR, Helpers.getError(e));
+      promise.reject(E_ERROR, getError(e, "Failed to get public key PEM"));
     }
   }
 
   @ReactMethod
   public void getPublicKeyDER(@NonNull String alias, @NonNull final Promise promise) {
     try {
-      PublicKey publicKey = Helpers.getPublicKeyRef(alias);
-      String encodedToString = Base64.encodeToString(publicKey.getEncoded(), Base64.NO_WRAP);
+      PublicKey publicKey = Objects.requireNonNull(crypto.getPublicKey(alias), "Key not found");
+      String encodedToString = encodeBase64(publicKey.getEncoded());
       promise.resolve(encodedToString);
     } catch (Exception e) {
-      promise.reject(E_ERROR, Helpers.getError(e));
+      promise.reject(E_ERROR, getError(e, "Failed to get public key DER"));
     }
   }
 
   @ReactMethod
   public void isKeyExists(@NonNull String alias, @NonNull final Promise promise) {
     try {
-      promise.resolve(Helpers.isKeyExists(alias));
+      promise.resolve(crypto.containsKey(alias));
     } catch (Exception e) {
-      promise.reject(E_ERROR, Helpers.getError(e));
+      promise.reject(E_ERROR, getError(e, "Failed to check if key exists"));
     }
   }
 
@@ -343,7 +341,7 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
     try {
       promise.resolve(Device.hasEnrolledBiometry(getReactApplicationContext()));
     } catch (Exception e) {
-      promise.reject(E_ERROR, Helpers.getError(e));
+      promise.reject(E_ERROR, getError(e, "Failed to check if biometry is enrolled"));
     }
   }
 
@@ -363,7 +361,7 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
       }
       promise.resolve(NOT_PROTECTED);
     } catch (Exception e) {
-      promise.reject(E_ERROR, Helpers.getError(e));
+      promise.reject(E_ERROR, getError(e, "Failed to determine device security level"));
     }
   }
 
@@ -387,23 +385,24 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
 
       promise.resolve(NONE);
     } catch (Exception e) {
-      promise.reject(E_ERROR, Helpers.getError(e));
+      promise.reject(E_ERROR, getError(e, "Failed to determine biometry type"));
     }
   }
 
   @ReactMethod
   public void authenticateWithBiometry(ReadableMap options, final Promise promise) {
+    String errorMessage = "Failed to authenticate with biometry";
     try {
       Authenticator.authenticate(options.toHashMap(), requireCurrentActivity())
         .whenCompleteAsync((cryptoObject, throwable) -> {
           if (null != throwable) {
-            promise.reject(E_ERROR, Helpers.getError(throwable));
+            promise.reject(E_ERROR, getError(throwable, errorMessage));
           } else {
             promise.resolve(true);
           }
         });
     } catch (Exception e) {
-      Helpers.getError(e);
+      promise.reject(E_ERROR, getError(e, errorMessage));
     }
   }
 
@@ -415,9 +414,92 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
     return Base64.encodeToString(data, Base64.NO_WRAP);
   }
 
+  private static PublicKey decodePublicKeyASN1(byte[] publicKeyBytes) throws NoSuchAlgorithmException, InvalidKeySpecException {
+    String algorithm = SubjectPublicKeyInfo.getInstance(publicKeyBytes).getAlgorithm().getAlgorithm().getId();
+    X509EncodedKeySpec keySpec = new X509EncodedKeySpec(publicKeyBytes);
+    KeyFactory keyFactory = KeyFactory.getInstance(algorithm);
+    return keyFactory.generatePublic(keySpec);
+  }
+
+  private static EncryptionResult encrypt(@NonNull byte[] bytesToEncrypt, @NonNull Cipher cipher) throws IllegalBlockSizeException, BadPaddingException {
+    byte[] encryptedBytes = cipher.doFinal(bytesToEncrypt);
+    byte[] iv = cipher.getIV();
+    return new EncryptionResult(encryptedBytes, iv);
+  }
+
+  private static String getPublicKeyPEMFormatted(@NonNull PublicKey publicKey)  {
+    String pubStr = Base64.encodeToString(publicKey.getEncoded(), Base64.DEFAULT);
+    return String.format("-----BEGIN PUBLIC KEY-----\n%s-----END PUBLIC KEY-----", pubStr);
+  }
+
+  private void checkKeyCompatibility(KeyInfo keyInfo, Context context) {
+    if (keyInfo.isUserAuthenticationRequired()) {
+      if (!Device.hasEnrolledBiometry(context))
+        throw new RuntimeException("Device cannot sign/encrypt. (No biometry enrolled)");
+      if (!Device.isAppGrantedToUseBiometry(context))
+        throw new RuntimeException("The app is not granted to use biometry.");
+    }
+  }
+
   @NonNull
   private Activity requireCurrentActivity() {
     return Objects.requireNonNull(getCurrentActivity(), "@ReactMethod should be called only in context of Activity");
+  }
+
+  private static boolean isCompatible(@NonNull final Context context, @NonNull AndroidCrypto.AccessLevel accessLevel) {
+    switch (accessLevel) {
+      case UNLOCKED_DEVICE:
+        return Device.hasPinOrPassword(context);
+      case AUTHENTICATION_REQUIRED:
+        return Device.hasEnrolledBiometry(context);
+      default:
+        return true;
+    }
+  }
+
+  private static Optional<Boolean> getBoolean(ReadableMap options, String key) {
+    if(options.hasKey(key)) return Optional.of(options.getBoolean(key));
+    return Optional.empty();
+  }
+
+  private static boolean isInputBase64(ReadableMap options) {
+    return getBoolean(options,"inputIsBase64").orElse(false);
+  }
+
+  private static String getError(Throwable e, String message) {
+    String errorMessage = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+    Log.e(RN_MODULE, message, e);
+    return errorMessage == null ? message : errorMessage;
+  }
+
+  private static WritableMap toWritableMap(EncryptionResult encryptionResult) {
+    WritableMap jsObject = Arguments.createMap();
+    write(encryptionResult, jsObject);
+    return jsObject;
+  }
+
+  private static void write(EncryptionResult encryptionResult, WritableMap map) {
+    if (null != encryptionResult.initializationVector)
+      map.putString("initializationVector", encodeBase64(encryptionResult.initializationVector));
+    map.putString("cipherText", encodeBase64(encryptionResult.cipherText));
+  }
+
+  enum KeyType {
+    SIGNING,
+    SYMMETRIC_ENCRYPTION,
+    ASYMMETRIC_ENCRYPTION;
+
+    public static KeyType fromInt(int accessLevel) {
+      switch (accessLevel) {
+        case 0:
+          return SIGNING;
+        case 1:
+          return SYMMETRIC_ENCRYPTION;
+        case 2:
+          return ASYMMETRIC_ENCRYPTION;
+      }
+      throw new IllegalArgumentException("Invalid key type");
+    }
   }
 
 }
