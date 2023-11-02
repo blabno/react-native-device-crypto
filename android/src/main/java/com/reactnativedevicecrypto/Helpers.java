@@ -13,10 +13,6 @@ import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
 
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
-import org.bouncycastle.crypto.CipherParameters;
-import org.bouncycastle.crypto.digests.SHA256Digest;
-import org.bouncycastle.crypto.generators.PKCS5S2ParametersGenerator;
-import org.bouncycastle.jcajce.provider.symmetric.util.BCPBEKey;
 
 import java.lang.annotation.Retention;
 import java.security.Key;
@@ -58,7 +54,6 @@ public class Helpers {
     private static final String KEY_STORE = "AndroidKeyStore";
     private static final String AES_ALGORITHM = "AES/GCM/NoPadding";
     private static final String RSA_ALGORITHM = "RSA/ECB/OAEPPadding";
-    private static final int AES_KEY_SIZE = 256;
     public static final String PEM_HEADER = "-----BEGIN PUBLIC KEY-----\n";
     public static final String PEM_FOOTER = "-----END PUBLIC KEY-----";
 
@@ -135,7 +130,7 @@ public class Helpers {
         return !keyInfo.isUserAuthenticationRequired();
     }
 
-    protected static KeyGenParameterSpec.Builder getBuilder(@NonNull String alias, @NonNull @KeyType.Types int keyType, @NonNull ReadableMap options) throws Exception {
+    protected static KeyGenParameterSpec.Builder getBuilder(@NonNull String alias, @KeyType.Types int keyType, @NonNull ReadableMap options) throws Exception {
         int accessLevel = options.hasKey("accessLevel") ? options.getInt("accessLevel") : Helpers.AccessLevel.ALWAYS;
         boolean invalidateOnNewBiometry = !options.hasKey("invalidateOnNewBiometry") || options.getBoolean("invalidateOnNewBiometry");
         int purposes = KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY | KeyProperties.PURPOSE_DECRYPT | KeyProperties.PURPOSE_ENCRYPT;
@@ -222,8 +217,7 @@ public class Helpers {
 
     public static PrivateKey getPrivateKeyRef(@NonNull String alias) throws Exception {
         KeyStore keyStore = getKeyStore();
-        PrivateKey privateKey = (PrivateKey) keyStore.getKey(alias, null);
-        return privateKey;
+        return (PrivateKey) keyStore.getKey(alias, null);
     }
 
     public static String getPublicKeyPEMFormatted(@NonNull String alias) throws Exception {
@@ -326,16 +320,6 @@ public class Helpers {
         return new EncryptionResult(encryptedBytes, iv);
     }
 
-    //    TODO deriveSecretKey should take algo name and iteration count as params
-    public static SecretKey deriveSecretKey(String password, byte[] salt) {
-        /* Derive the key, given password and salt. */
-        byte[] passwordBytes = Base64.decode(password, Base64.NO_WRAP);
-        PKCS5S2ParametersGenerator generator = new PKCS5S2ParametersGenerator(new SHA256Digest());
-        generator.init(passwordBytes, salt, 1024);
-        CipherParameters cipherParameters = generator.generateDerivedParameters(AES_KEY_SIZE);
-        return new BCPBEKey("PBKDF2WithHmacSHA256", cipherParameters);
-    }
-
     public static PublicKey decodeBase64PublicKeyASN1(String base64PublicKeyASN1) throws NoSuchAlgorithmException, InvalidKeySpecException {
         byte[] publicKeyBytes = Base64.decode(base64PublicKeyASN1, Base64.NO_WRAP);
         String algorithm = SubjectPublicKeyInfo.getInstance(publicKeyBytes).getAlgorithm().getAlgorithm().getId();
@@ -370,6 +354,7 @@ public class Helpers {
             this.initializationVector = initializationVector;
         }
 
+        @NonNull
         @Override
         public String toString() {
             return "EncryptionResult{" +
