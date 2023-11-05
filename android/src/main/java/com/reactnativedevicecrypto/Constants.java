@@ -11,11 +11,6 @@ public class Constants {
     public static final String IRIS = "IRIS";
     public static final String NONE = "NONE";
 
-    // Biometric prompt defaults
-    public static final String BIOMETRY_TITLE = "Biometric Authentication";
-    public static final String BIOMETRY_SUBTITLE = "Authentication required";
-    public static final String BIOMETRY_DESCRIPTION = "";
-
     public static final String RN_MODULE = "RNDeviceCrypto";
     public static final String E_ERROR = "ERROR";
 }

@@ -14,6 +14,9 @@ import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.module.annotations.ReactModule;
+import com.labnoratory.android_crypto.AndroidAuthenticator;
+import com.labnoratory.android_crypto.AndroidCrypto;
+import com.labnoratory.android_crypto.EncryptionResult;
 
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
 
@@ -21,7 +24,6 @@ import java.security.KeyFactory;
 import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
 import java.security.SecureRandom;
-import java.security.Signature;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Objects;
@@ -33,7 +35,6 @@ import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.SecretKey;
 
 import androidx.annotation.NonNull;
-import androidx.biometric.BiometricPrompt;
 
 import static com.reactnativedevicecrypto.Constants.BIOMETRY;
 import static com.reactnativedevicecrypto.Constants.E_ERROR;
@@ -111,32 +112,20 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
     String errorMessage = "Failed to sign";
     try {
       ReactApplicationContext context = getReactApplicationContext();
-      Signature signature = crypto.initializeSignature(alias);
-
       byte[] payloadBytes = decodeBase64(payload);
-      KeyInfo keyInfo = crypto.getKeyInfo(alias);
-      if (!keyInfo.isUserAuthenticationRequired()) {
-        byte[] signatureBytes = crypto.sign(payloadBytes, signature);
-        promise.resolve(encodeBase64(signatureBytes));
-        return;
-      }
-
-      checkKeyCompatibility(keyInfo, context);
-
-      BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(signature);
-      Authenticator.authenticate(options.toHashMap(), requireCurrentActivity(), cryptoObject)
-        .whenCompleteAsync((result, throwable) -> {
-          if (null != throwable) {
-            promise.reject(E_ERROR, getError(throwable, errorMessage));
-            return;
-          }
-          try {
-            byte[] signatureBytes = crypto.sign(payloadBytes, Objects.requireNonNull(result.getSignature()));
-            promise.resolve(encodeBase64(signatureBytes));
-          } catch (Exception e) {
-            promise.reject(E_ERROR, getError(e, errorMessage));
-          }
-        });
+      AndroidAuthenticator authenticator = new AndroidAuthenticator(requireCurrentActivity(), options.toHashMap());
+      crypto.sign(alias, payloadBytes, authenticator)
+              .whenCompleteAsync((result, throwable) -> {
+                if (null != throwable) {
+                  promise.reject(E_ERROR, getError(throwable, errorMessage));
+                  return;
+                }
+                try {
+                  promise.resolve(encodeBase64(result));
+                } catch (Exception e) {
+                  promise.reject(E_ERROR, getError(e, errorMessage));
+                }
+              });
     } catch (Exception e) {
       promise.reject(E_ERROR, getError(e, errorMessage));
     }
@@ -148,31 +137,19 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
     try {
       ReactApplicationContext context = getReactApplicationContext();
       byte[] bytesToEncrypt = decodeBase64(payload);
-      Cipher cipher = crypto.initializeSymmetricCipherForEncryption(alias);
-
-      KeyInfo keyInfo = crypto.getKeyInfo(alias);
-      if (!keyInfo.isUserAuthenticationRequired()) {
-        EncryptionResult result = encrypt(bytesToEncrypt, cipher);
-        promise.resolve(toWritableMap(result));
-        return;
-      }
-
-      checkKeyCompatibility(keyInfo, context);
-
-      BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(cipher);
-      Authenticator.authenticate(options.toHashMap(), requireCurrentActivity(), cryptoObject)
-        .whenCompleteAsync((result, throwable) -> {
-          if (null != throwable) {
-            promise.reject(E_ERROR, getError(throwable, errorMessage));
-            return;
-          }
-          try {
-              EncryptionResult encryptionResult = encrypt(bytesToEncrypt, Objects.requireNonNull(result.getCipher()));
-              promise.resolve(toWritableMap(encryptionResult));
-          } catch (Exception e) {
-            promise.reject(E_ERROR, getError(e, errorMessage));
-          }
-        });
+      AndroidAuthenticator authenticator = new AndroidAuthenticator(requireCurrentActivity(), options.toHashMap());
+      crypto.encryptSymmetrically(alias, bytesToEncrypt, authenticator)
+              .whenCompleteAsync((encryptionResult, throwable) -> {
+                if (null != throwable) {
+                  promise.reject(E_ERROR, getError(throwable, errorMessage));
+                  return;
+                }
+                try {
+                  promise.resolve(toWritableMap(encryptionResult));
+                } catch (Exception e) {
+                  promise.reject(E_ERROR, getError(e, errorMessage));
+                }
+              });
     } catch (Exception e) {
       promise.reject(E_ERROR, getError(e, errorMessage));
     }
@@ -184,9 +161,7 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
     try {
       ReactApplicationContext context = getReactApplicationContext();
       byte[] bytesToEncrypt = decodeBase64(payload);
-      SecretKey secretKey = crypto.deriveSecretKey(decodeBase64(password), decodeBase64(salt), iterations);
-      Cipher cipher = crypto.initializeSymmetricCipherForEncryption(secretKey);
-      EncryptionResult result = encrypt(bytesToEncrypt, cipher);
+      EncryptionResult result = crypto.encryptSymmetricallyWithPassword(decodeBase64(password), decodeBase64(salt), iterations, bytesToEncrypt);
       promise.resolve(toWritableMap(result));
     } catch (Exception e) {
       promise.reject(E_ERROR, getError(e, errorMessage));
@@ -198,9 +173,8 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
     try {
       PublicKey publicKey = decodePublicKeyASN1(decodeBase64(publicKeyDER));
       byte[] bytesToEncrypt = decodeBase64(payload);
-      Cipher cipher = crypto.initializeAsymmetricCipherForEncryption(publicKey);
-      EncryptionResult result = encrypt(bytesToEncrypt, cipher);
-      promise.resolve(encodeBase64(result.cipherText));
+      byte[] result = crypto.encryptAsymmetrically(publicKey,bytesToEncrypt);
+      promise.resolve(encodeBase64(result));
     } catch (Exception e) {
       promise.reject(E_ERROR, getError(e, "Failed to encrypt asymmetrically"));
     }
@@ -211,27 +185,18 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
     String errorMessage = "Failed to decrypt symmetrically";
     try {
       ReactApplicationContext context = getReactApplicationContext();
-      Cipher cipher = crypto.initializeSymmetricCipherForDecryption(alias, decodeBase64(iv));
-
       byte[] cipherTextBytes = decodeBase64(cipherText);
       KeyInfo keyInfo = crypto.getKeyInfo(alias);
-      if (!keyInfo.isUserAuthenticationRequired()) {
-        byte[] result = cipher.doFinal(cipherTextBytes);
-        promise.resolve(encodeBase64(result));
-        return;
-      }
-
       checkKeyCompatibility(keyInfo, context);
 
-      BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(cipher);
-      Authenticator.authenticate(options.toHashMap(), requireCurrentActivity(), cryptoObject)
-        .whenCompleteAsync((result, throwable) -> {
+      AndroidAuthenticator authenticator = new AndroidAuthenticator(requireCurrentActivity(), options.toHashMap());
+      crypto.decryptSymmetrically(alias, cipherTextBytes, decodeBase64(iv), authenticator)
+        .whenCompleteAsync((decryptedBytes, throwable) -> {
           if (null != throwable) {
             promise.reject(E_ERROR, getError(throwable, errorMessage));
             return;
           }
           try {
-            byte[] decryptedBytes = Objects.requireNonNull(result.getCipher()).doFinal(cipherTextBytes);
             promise.resolve(encodeBase64(decryptedBytes));
           } catch (Exception e) {
             promise.reject(E_ERROR, getError(e, errorMessage));
@@ -248,9 +213,7 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
     try {
       ReactApplicationContext context = getReactApplicationContext();
       byte[] cipherTextBytes = decodeBase64(cipherText);
-      SecretKey secretKey = crypto.deriveSecretKey(decodeBase64(password), decodeBase64(salt), iterations);
-      Cipher cipher = crypto.initializeSymmetricCipherForDecryption(secretKey, decodeBase64(iv));
-      byte[] result = cipher.doFinal(cipherTextBytes);
+      byte[] result = crypto.decryptSymmetricallyWithPassword(decodeBase64(password), decodeBase64(salt),iterations, cipherTextBytes, decodeBase64(iv));
       promise.resolve(encodeBase64(result));
     } catch (Exception e) {
       promise.reject(E_ERROR, getError(e, errorMessage));
@@ -263,26 +226,18 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
     try {
       byte[] cipherTextBytes = decodeBase64(cipherText);
       ReactApplicationContext context = getReactApplicationContext();
-      Cipher cipher = crypto.initializeAsymmetricCipherForDecryption(alias);
 
       KeyInfo keyInfo = crypto.getKeyInfo(alias);
-      if (!keyInfo.isUserAuthenticationRequired()) {
-        byte[] result = cipher.doFinal(cipherTextBytes);
-        promise.resolve(encodeBase64(result));
-        return;
-      }
-
       checkKeyCompatibility(keyInfo, context);
 
-      BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(cipher);
-      Authenticator.authenticate(options.toHashMap(), requireCurrentActivity(), cryptoObject)
-        .whenCompleteAsync((result, throwable) -> {
+      AndroidAuthenticator authenticator = new AndroidAuthenticator(requireCurrentActivity(), options.toHashMap());
+      crypto.decryptAsymmetrically(alias, cipherTextBytes, authenticator)
+        .whenCompleteAsync((decryptedBytes, throwable) -> {
           if (null != throwable) {
             promise.reject(E_ERROR, getError(throwable, errorMessage));
             return;
           }
           try {
-            byte[] decryptedBytes = Objects.requireNonNull(result.getCipher()).doFinal(cipherTextBytes);
             promise.resolve(encodeBase64(decryptedBytes));
           } catch (Exception e) {
             promise.reject(E_ERROR, getError(e, errorMessage));
@@ -393,7 +348,8 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
   public void authenticateWithBiometry(ReadableMap options, final Promise promise) {
     String errorMessage = "Failed to authenticate with biometry";
     try {
-      Authenticator.authenticate(options.toHashMap(), requireCurrentActivity())
+      AndroidAuthenticator authenticator = new AndroidAuthenticator(requireCurrentActivity(), options.toHashMap());
+      authenticator.authenticate(null)
         .whenCompleteAsync((cryptoObject, throwable) -> {
           if (null != throwable) {
             promise.reject(E_ERROR, getError(throwable, errorMessage));
@@ -479,9 +435,10 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
   }
 
   private static void write(EncryptionResult encryptionResult, WritableMap map) {
-    if (null != encryptionResult.initializationVector)
-      map.putString("initializationVector", encodeBase64(encryptionResult.initializationVector));
-    map.putString("cipherText", encodeBase64(encryptionResult.cipherText));
+    byte[] initializationVector = encryptionResult.getInitializationVector();
+    if (null != initializationVector)
+      map.putString("initializationVector", encodeBase64(initializationVector));
+    map.putString("cipherText", encodeBase64(encryptionResult.getCipherText()));
   }
 
   enum KeyType {
