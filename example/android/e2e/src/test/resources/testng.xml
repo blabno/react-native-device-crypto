@@ -1,0 +1,29 @@
+<!DOCTYPE suite SYSTEM "http://testng.org/testng-1.0.dtd" >
+
+<suite name="Android crypto" verbose="1">
+    <test name="AuthenticationE2ETest">
+        <classes>
+            <class name="com.labnoratory.android_device.e2e.TestSuiteSetup" />
+            <class name="com.labnoratory.android_device.e2e.AuthenticationE2ETest" />
+        </classes>
+    </test>
+    <test name="AsymmetricEncryptionE2ETest">
+        <classes>
+            <class name="com.labnoratory.android_device.e2e.TestSuiteSetup" />
+            <class name="com.labnoratory.android_device.e2e.AsymmetricEncryptionE2ETest" />
+        </classes>
+    </test>
+    <test name="SymmetricEncryptionE2ETest">
+        <classes>
+            <class name="com.labnoratory.android_device.e2e.TestSuiteSetup" />
+            <class name="com.labnoratory.android_device.e2e.SymmetricEncryptionE2ETest" />
+        </classes>
+    </test>
+    <test name="SymmetricEncryptionWithPasswordE2ETest">
+        <classes>
+            <class name="com.labnoratory.android_device.e2e.TestSuiteSetup" />
+            <class
+                name="com.labnoratory.android_device.e2e.SymmetricEncryptionWithPasswordE2ETest" />
+        </classes>
+    </test>
+</suite>

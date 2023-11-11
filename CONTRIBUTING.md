@@ -112,3 +112,25 @@ When you're sending a pull request:
 - Review the documentation to make sure it looks good.
 - Follow the pull request template when opening a pull request.
 - For pull requests that change the API or implementation, discuss with maintainers first by opening an issue.
+
+## Running E2E tests
+
+Install Appium
+
+    yarn global add appium
+    appium driver install uiautomator2
+
+Start Appium from `example/android` directory:
+
+    appium
+
+Start emulator
+
+    export AVD_NAME=AndroidDeviceE2E
+    avdmanager delete avd --name $AVD_NAME
+    avdmanager create avd --force --name $AVD_NAME --abi google_apis/x86 --package 'system-images;android-29;google_apis;x86' --device "Nexus 6P"
+    emulator -avd $AVD_NAME
+
+Run tests:
+
+    ./gradlew clean :e2e:testDebugUnitTest

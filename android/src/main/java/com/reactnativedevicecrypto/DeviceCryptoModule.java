@@ -90,7 +90,7 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
         promise.resolve(getPublicKeyPEMFormatted(publicKey));
       } else {
         SecretKey secretKey = crypto.createSymmetricEncryptionKey(alias, accessLevel, invalidateOnNewBiometry);
-        promise.resolve(true);
+        promise.resolve(null);
       }
     } catch (Exception e) {
       promise.reject(E_ERROR, getError(e, "Failed to create key"));
@@ -133,7 +133,7 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
 
   @ReactMethod
   public void encryptSymmetrically(@NonNull String alias, String payload, ReadableMap options, @NonNull final Promise promise) {
-    String errorMessage = "Failed to encrypt symmetrically";
+    String errorMessage = "Failed to encrypt with symmetric key";
     try {
       ReactApplicationContext context = getReactApplicationContext();
       byte[] bytesToEncrypt = decodeBase64(payload);
@@ -156,8 +156,8 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod
-  public void encryptSymmetricallyWithPasswordAndSalt(@NonNull String password, @NonNull String salt, int iterations, String payload, @NonNull final Promise promise) {
-    String errorMessage = "Failed to encrypt symmetrically with password and salt";
+  public void encryptSymmetricallyWithPassword(@NonNull String password, @NonNull String salt, int iterations, String payload, @NonNull final Promise promise) {
+    String errorMessage = "Failed to encrypt with password";
     try {
       ReactApplicationContext context = getReactApplicationContext();
       byte[] bytesToEncrypt = decodeBase64(payload);
@@ -176,13 +176,13 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
       byte[] result = crypto.encryptAsymmetrically(publicKey,bytesToEncrypt);
       promise.resolve(encodeBase64(result));
     } catch (Exception e) {
-      promise.reject(E_ERROR, getError(e, "Failed to encrypt asymmetrically"));
+      promise.reject(E_ERROR, getError(e, "Failed to encrypt with asymmetric key"));
     }
   }
 
   @ReactMethod
   public void decryptSymmetrically(@NonNull String alias, @NonNull String cipherText, String iv, @NonNull ReadableMap options, @NonNull final Promise promise) {
-    String errorMessage = "Failed to decrypt symmetrically";
+    String errorMessage = "Failed to decrypt with symmetric key";
     try {
       ReactApplicationContext context = getReactApplicationContext();
       byte[] cipherTextBytes = decodeBase64(cipherText);
@@ -208,8 +208,8 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod
-  public void decryptSymmetricallyWithPasswordAndSalt(@NonNull String password, @NonNull String salt, @NonNull String iv, int iterations, String cipherText, @NonNull final Promise promise) {
-    String errorMessage = "Failed to encrypt symmetrically with password and salt";
+  public void decryptSymmetricallyWithPassword(@NonNull String password, @NonNull String salt, @NonNull String iv, int iterations, String cipherText, @NonNull final Promise promise) {
+    String errorMessage = "Failed to decrypt with password";
     try {
       ReactApplicationContext context = getReactApplicationContext();
       byte[] cipherTextBytes = decodeBase64(cipherText);
@@ -222,7 +222,7 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
 
   @ReactMethod
   public void decryptAsymmetrically(@NonNull String alias, @NonNull String cipherText, @NonNull ReadableMap options, @NonNull final Promise promise) {
-    String errorMessage = "Failed to decrypt asymmetrically";
+    String errorMessage = "Failed to decrypt with asymmetric key";
     try {
       byte[] cipherTextBytes = decodeBase64(cipherText);
       ReactApplicationContext context = getReactApplicationContext();
@@ -354,7 +354,7 @@ public class DeviceCryptoModule extends ReactContextBaseJavaModule {
           if (null != throwable) {
             promise.reject(E_ERROR, getError(throwable, errorMessage));
           } else {
-            promise.resolve(true);
+            promise.resolve(null);
           }
         });
     } catch (Exception e) {

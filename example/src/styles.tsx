@@ -25,6 +25,12 @@ const styles = StyleSheet.create({
     padding: 10,
     backgroundColor: '#996600'
   },
+  infoBox: {
+    marginTop: 8,
+    padding: 10,
+    backgroundColor: '#128800',
+    color: '#fff'
+  },
   errorBox: {
     marginTop: 8,
     padding: 10,

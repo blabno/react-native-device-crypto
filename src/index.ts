@@ -69,12 +69,12 @@ const DeviceCrypto = {
    *
    * Cryptography algorithms AES256
    *
-   * @return {Promise} Resolves to `true` when successful
+   * @return {Promise} Resolves when successful
    */
   async getOrCreateSymmetricEncryptionKey(
     alias: string,
     options: KeyCreationParams
-  ): Promise<boolean> {
+  ): Promise<void> {
     return RNDeviceCrypto.createKey(alias, {
       ...options,
       keyType: KeyTypes.SYMMETRIC_ENCRYPTION
@@ -176,13 +176,13 @@ const DeviceCrypto = {
    * @param {String} payloadBase64 data to be encrypted
    * @return {Promise} Resolves to encrypted text `Base64` formatted
    */
-  async encryptSymmetricallyWithPasswordAndSalt(
+  async encryptSymmetricallyWithPassword(
     passwordBase64: string,
     saltBase64: string,
     iterations: number,
     payloadBase64: string
   ): Promise<EncryptionResult> {
-    return RNDeviceCrypto.encryptSymmetricallyWithPasswordAndSalt(passwordBase64, saltBase64, iterations, payloadBase64);
+    return RNDeviceCrypto.encryptSymmetricallyWithPassword(passwordBase64, saltBase64, iterations, payloadBase64);
   },
 
   /**
@@ -195,14 +195,14 @@ const DeviceCrypto = {
    * @param {String} cipherTextBase64 data to be decrypted
    * @return {Promise} Resolves to decrypted text `Base64` formatted
    */
-  async decryptSymmetricallyWithPasswordAndSalt(
+  async decryptSymmetricallyWithPassword(
     passwordBase64: string,
     saltBase64: string,
     ivBase64: string,
     iterations: number,
     cipherTextBase64: string
   ): Promise<string> {
-    return RNDeviceCrypto.decryptSymmetricallyWithPasswordAndSalt(passwordBase64, saltBase64, ivBase64, iterations, cipherTextBase64);
+    return RNDeviceCrypto.decryptSymmetricallyWithPassword(passwordBase64, saltBase64, ivBase64, iterations, cipherTextBase64);
   },
 
   /**
@@ -260,9 +260,9 @@ const DeviceCrypto = {
   /**
    * Authenticate user with device biometry
    *
-   * @returns {Promise} Resolves `true` if user passes biometry or fallback pin
+   * @returns {Promise} that resolves if user passes biometry or fallback pin, rejects otherwise
    */
-  async authenticateWithBiometry(options: BiometryParams): Promise<boolean> {
+  async authenticateWithBiometry(options: BiometryParams): Promise<void> {
     return RNDeviceCrypto.authenticateWithBiometry(options);
   }
 };
